@@ -61,7 +61,7 @@ extension XCTestCase {
 
     func XCTAssertSwiftError<T, E: Error & Equatable>(_ expression: @autoclosure () throws -> T,
                                                       throws error: E,
-                                                      in file: StaticString = #file,
+                                                      in file: StaticString = #filePath,
                                                       line: UInt = #line) {
         var thrownError: Error?
         XCTAssertThrowsError(try expression(), file: file, line: line) { thrownError = $0}
@@ -71,7 +71,7 @@ extension XCTestCase {
 
     func XCTAssertPOSIXError<T>(_ expression: @autoclosure () throws -> T,
                                 throwsErrorWithCode code: POSIXError.Code,
-                                in file: StaticString = #file,
+                                in file: StaticString = #filePath,
                                 line: UInt = #line) {
         var thrownError: POSIXError?
         XCTAssertThrowsError(try expression(), file: file, line: line) { thrownError = $0 as? POSIXError }
@@ -81,7 +81,7 @@ extension XCTestCase {
 
     func XCTAssertCocoaError<T>(_ expression: @autoclosure () throws -> T,
                                 throwsErrorWithCode code: CocoaError.Code,
-                                in file: StaticString = #file,
+                                in file: StaticString = #filePath,
                                 line: UInt = #line) {
         var thrownError: CocoaError?
         #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)

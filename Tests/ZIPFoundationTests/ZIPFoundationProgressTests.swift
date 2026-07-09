@@ -14,7 +14,10 @@ import XCTest
 extension ZIPFoundationTests {
 
     func testArchiveAddUncompressedEntryProgress() {
-        let archive = self.archive(for: #function, mode: .update)
+        // The archive is only ever touched on `zipQueue` (async work, then the `sync` verification
+        // below); the `wait` in between runs on the test thread and does not access it. This queue
+        // confinement is safe but not provable to the compiler, hence `nonisolated(unsafe)`.
+        nonisolated(unsafe) let archive = self.archive(for: #function, mode: .update)
         let assetURL = self.resourceURL(for: #function, pathExtension: "png")
         let progress = archive.makeProgressForAddingItem(at: assetURL)
         let handler: XCTKVOExpectation.Handler = { (_, _) -> Bool in
@@ -46,7 +49,10 @@ extension ZIPFoundationTests {
     }
 
     func testArchiveAddCompressedEntryProgress() {
-        let archive = self.archive(for: #function, mode: .update)
+        // The archive is only ever touched on `zipQueue` (async work, then the `sync` verification
+        // below); the `wait` in between runs on the test thread and does not access it. This queue
+        // confinement is safe but not provable to the compiler, hence `nonisolated(unsafe)`.
+        nonisolated(unsafe) let archive = self.archive(for: #function, mode: .update)
         let assetURL = self.resourceURL(for: #function, pathExtension: "png")
         let progress = archive.makeProgressForAddingItem(at: assetURL)
         let handler: XCTKVOExpectation.Handler = { (_, _) -> Bool in
@@ -79,11 +85,16 @@ extension ZIPFoundationTests {
     }
 
     func testRemoveEntryProgress() {
-        let archive = self.archive(for: #function, mode: .update)
-        guard let entryToRemove = archive["test/data.random"] else {
+        // The archive is only ever touched on `zipQueue` (async work, then the `sync` verification
+        // below); the `wait` in between runs on the test thread and does not access it. This queue
+        // confinement is safe but not provable to the compiler, hence `nonisolated(unsafe)`.
+        nonisolated(unsafe) let archive = self.archive(for: #function, mode: .update)
+        guard let foundEntry = archive["test/data.random"] else {
             XCTFail("Failed to find entry to remove in uncompressed folder")
             return
         }
+        // Confined to `zipQueue` alongside `archive` (see note above).
+        nonisolated(unsafe) let entryToRemove = foundEntry
         let progress = archive.makeProgressForRemoving(entryToRemove)
         let handler: XCTKVOExpectation.Handler = { (_, _) -> Bool in
             if progress.fractionCompleted > 0.5 {
@@ -112,25 +123,23 @@ extension ZIPFoundationTests {
     }
 
     func testZipItemProgress() throws {
-        let fileManager = FileManager()
         let assetURL = self.resourceURL(for: #function, pathExtension: "png")
-        var fileArchiveURL = ZIPFoundationTests.tempZipDirectoryURL
-        fileArchiveURL.appendPathComponent(self.archiveName(for: #function))
+        let fileArchiveURL = ZIPFoundationTests.tempZipDirectoryURL
+            .appendingPathComponent(self.archiveName(for: #function))
         let fileProgress = Progress()
         let fileExpectation = self.keyValueObservingExpectation(for: fileProgress,
                                                                 keyPath: #keyPath(Progress.fractionCompleted),
                                                                 expectedValue: 1.0)
-        var didSucceed = true
         let testQueue = DispatchQueue.global()
         testQueue.async {
             do {
-                try fileManager.zipItem(at: assetURL, to: fileArchiveURL, progress: fileProgress)
-            } catch { didSucceed = false }
+                try FileManager().zipItem(at: assetURL, to: fileArchiveURL, progress: fileProgress)
+            } catch { XCTFail("Failed to zip item with error : \(error)") }
         }
-        var directoryURL = ZIPFoundationTests.tempZipDirectoryURL
-        directoryURL.appendPathComponent(ProcessInfo.processInfo.globallyUniqueString)
-        var directoryArchiveURL = ZIPFoundationTests.tempZipDirectoryURL
-        directoryArchiveURL.appendPathComponent(self.archiveName(for: #function, suffix: "Directory"))
+        let directoryURL = ZIPFoundationTests.tempZipDirectoryURL
+            .appendingPathComponent(ProcessInfo.processInfo.globallyUniqueString)
+        let directoryArchiveURL = ZIPFoundationTests.tempZipDirectoryURL
+            .appendingPathComponent(self.archiveName(for: #function, suffix: "Directory"))
         let newAssetURL = directoryURL.appendingPathComponent(assetURL.lastPathComponent)
         let directoryProgress = Progress()
         let directoryExpectation = self.keyValueObservingExpectation(for: directoryProgress,
@@ -138,6 +147,7 @@ extension ZIPFoundationTests {
                                                                      expectedValue: 1.0)
         testQueue.async {
             do {
+                let fileManager = FileManager()
                 try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
                 try fileManager.createDirectory(at: directoryURL.appendingPathComponent("nested"),
                                                 withIntermediateDirectories: true, attributes: nil)
@@ -145,10 +155,9 @@ extension ZIPFoundationTests {
                 try fileManager.createSymbolicLink(at: directoryURL.appendingPathComponent("link"),
                                                    withDestinationURL: newAssetURL)
                 try fileManager.zipItem(at: directoryURL, to: directoryArchiveURL, progress: directoryProgress)
-            } catch { didSucceed = false }
+            } catch { XCTFail("Failed to zip directory with error : \(error)") }
         }
         self.wait(for: [fileExpectation, directoryExpectation], timeout: 20.0)
-        XCTAssert(didSucceed)
         let archive = try Archive(url: fileArchiveURL, accessMode: .read)
         XCTAssert(archive.checkIntegrity())
         let directoryArchive = try Archive(url: directoryArchiveURL, accessMode: .read)
@@ -156,14 +165,15 @@ extension ZIPFoundationTests {
     }
 
     func testUnzipItemProgress() {
-        let fileManager = FileManager()
-        let archive = self.archive(for: #function, mode: .read)
+        // The archive is only used within the background closure below, never on the test thread.
+        nonisolated(unsafe) let archive = self.archive(for: #function, mode: .read)
         let destinationURL = self.createDirectory(for: #function)
         let progress = Progress()
         let expectation = self.keyValueObservingExpectation(for: progress,
                                                             keyPath: #keyPath(Progress.fractionCompleted),
                                                             expectedValue: 1.0)
         DispatchQueue.global().async {
+            let fileManager = FileManager()
             do {
                 try fileManager.unzipItem(at: archive.url, to: destinationURL, progress: progress)
             } catch {
@@ -181,9 +191,9 @@ extension ZIPFoundationTests {
     }
 
     func testZIP64ArchiveAddEntryProgress() {
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        // See the note in `testArchiveAddUncompressedEntryProgress`: the archive is confined to `zipQueue`.
+        nonisolated(unsafe) let archive = self.archive(for: #function, mode: .update,
+                                                       zip64Thresholds: self.mockThresholds())
         let assetURL = self.resourceURL(for: #function, pathExtension: "png")
         let progress = archive.makeProgressForAddingItem(at: assetURL)
         let handler: XCTKVOExpectation.Handler = { (_, _) -> Bool in

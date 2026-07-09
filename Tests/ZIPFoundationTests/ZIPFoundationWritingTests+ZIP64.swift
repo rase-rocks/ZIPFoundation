@@ -18,9 +18,7 @@ extension ZIPFoundationTests {
 
     /// Target fields: Uncompressed Size, Compressed Size, Offset of Central Directory and other ZIP64 format fields
     func testCreateZIP64ArchiveWithLargeSize() {
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .create)
+        let archive = self.archive(for: #function, mode: .create, zip64Thresholds: self.mockThresholds())
         let size: UInt64 = 64 * 64 * 2
         let data = Data.makeRandomData(size: Int(size))
         let entryName = ProcessInfo.processInfo.globallyUniqueString
@@ -148,9 +146,7 @@ extension ZIPFoundationTests {
 
     /// Target fields: Relative Offset of Local Header
     func testAddEntryToArchiveWithZIP64LFHOffset() {
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         let size = 64 * 64 * 2
         let data = Data.makeRandomData(size: size)
         let entryName = ProcessInfo.processInfo.globallyUniqueString
@@ -170,9 +166,7 @@ extension ZIPFoundationTests {
     }
 
     func testAddDirectoryToArchiveWithZIP64LFHOffset() {
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         let entryName = "Test"
         let currentLFHOffset = archive.offsetToStartOfCentralDirectory
         do {
@@ -193,9 +187,8 @@ extension ZIPFoundationTests {
     /// Target fields: Total Number of Entries in Central Directory
     func testCreateZIP64ArchiveWithTooManyEntries() {
         let factor = 16
-        self.mockIntMaxValues(int16Factor: factor)
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .create)
+        let archive = self.archive(for: #function, mode: .create,
+                                   zip64Thresholds: self.mockThresholds(int16Factor: factor))
         let size = factor
         // Case 1: The total number of entries is less than maximum value
         do {
@@ -226,9 +219,8 @@ extension ZIPFoundationTests {
     /// Target fields: Size of Central Directory
     func testCreateZIP64ArchiveWithLargeSizeOfCD() {
         let factor = 10
-        self.mockIntMaxValues(int32Factor: factor)
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .create)
+        let archive = self.archive(for: #function, mode: .create,
+                                   zip64Thresholds: self.mockThresholds(int32Factor: factor))
         let size = 64
         // Case 1: The size of central directory is less than maximum value
         do {
@@ -259,9 +251,7 @@ extension ZIPFoundationTests {
         // testRemoveEntryFromArchiveWithZIP64EOCD.zip/
         //   ├─ data1.random (size: 64)
         //   ├─ data2.random (size: 64 * 64)
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         guard let entry = archive["data1.random"] else {
             XCTFail("Failed to retrieve ZIP64 format entry from archive"); return
         }
@@ -279,9 +269,7 @@ extension ZIPFoundationTests {
         // testRemoveEntryFromArchiveWithZIP64EOCD.zip/
         //   ├─ data1.random (size: 64)
         //   ├─ data2.random (size: 64 * 64)
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         guard let entry = archive["data2.random"] else {
             XCTFail("Failed to retrieve ZIP64 format entry from archive"); return
         }
@@ -301,9 +289,7 @@ extension ZIPFoundationTests {
         //   ├─ data2.random (size: 64 * 32)
         //   ├─ data3.random (size: 64 * 32) [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 4180, ..0]
         //   ├─ data4.random (size: 64 * 32) [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 6270, ..0]
-        self.mockIntMaxValues()
-        defer { self.resetIntMaxValues() }
-        let archive = self.archive(for: #function, mode: .update)
+        let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         guard let entry2 = archive["data2.random"] else {
             XCTFail("Failed to retrieve ZIP64 format entry from archive"); return
         }

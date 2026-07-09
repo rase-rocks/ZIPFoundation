@@ -131,13 +131,13 @@ extension ZIPFoundationTests {
     // MARK: - Helpers
 
     private func archiveZIP64Item(for testFunction: String, compressionMethod: CompressionMethod) throws {
-        self.mockIntMaxValues(int32Factor: 16, int16Factor: 16)
-        defer { self.resetIntMaxValues() }
+        let thresholds = self.mockThresholds(int32Factor: 16, int16Factor: 16)
         let assetURL = self.resourceURL(for: testFunction, pathExtension: "png")
         var fileArchiveURL = ZIPFoundationTests.tempZipDirectoryURL
         fileArchiveURL.appendPathComponent(self.archiveName(for: testFunction))
         do {
-            try FileManager().zipItem(at: assetURL, to: fileArchiveURL, compressionMethod: compressionMethod)
+            try FileManager().zipItem(at: assetURL, to: fileArchiveURL, compressionMethod: compressionMethod,
+                                      zip64Thresholds: thresholds)
         } catch {
             throw ZIP64FileManagerTestsError.failedToZipItem(url: assetURL)
         }

@@ -21,7 +21,7 @@ class ZIPFoundationTests: XCTestCase {
         return Bundle(for: self)
     }
 
-    static var tempZipDirectoryURL: URL = {
+    static let tempZipDirectoryURL: URL = {
         let processInfo = ProcessInfo.processInfo
         var tempZipDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
         tempZipDirectory.appendPathComponent("ZipTempDirectory")
@@ -34,7 +34,7 @@ class ZIPFoundationTests: XCTestCase {
     }()
 
     static var resourceDirectoryURL: URL {
-        var resourceDirectoryURL = URL(fileURLWithPath: #file)
+        var resourceDirectoryURL = URL(fileURLWithPath: #filePath)
         resourceDirectoryURL.deleteLastPathComponent()
         resourceDirectoryURL.appendPathComponent("Resources")
         return resourceDirectoryURL
@@ -68,7 +68,8 @@ class ZIPFoundationTests: XCTestCase {
     // MARK: - Helpers
 
     func archive(for testFunction: String, mode: Archive.AccessMode,
-                 preferredEncoding: String.Encoding? = nil) -> Archive {
+                 preferredEncoding: String.Encoding? = nil,
+                 zip64Thresholds: ZIP64Thresholds = .default) -> Archive {
         var sourceArchiveURL = ZIPFoundationTests.resourceDirectoryURL
         sourceArchiveURL.appendPathComponent(testFunction.replacingOccurrences(of: "()", with: ""))
         sourceArchiveURL.appendPathExtension("zip")
@@ -82,6 +83,7 @@ class ZIPFoundationTests: XCTestCase {
             }
             let archive = try Archive(url: destinationArchiveURL, accessMode: mode,
                                       pathEncoding: preferredEncoding)
+            archive.zip64Thresholds = zip64Thresholds
             return archive
         } catch {
             XCTFail("Failed to get test archive: \(error)")
@@ -159,14 +161,8 @@ class ZIPFoundationTests: XCTestCase {
     // It's not practical to create compressed files that exceed the size limit every time for test,
     // so provide helper methods to mock the maximum size limit
 
-    func mockIntMaxValues(int32Factor: Int = 64, int16Factor: Int = 64) {
-        maxUInt32 = UInt32(int32Factor * int32Factor)
-        maxUInt16 = UInt16(int16Factor)
-    }
-
-    func resetIntMaxValues() {
-        maxUInt32 = .max
-        maxUInt16 = .max
+    func mockThresholds(int32Factor: Int = 64, int16Factor: Int = 64) -> ZIP64Thresholds {
+        return ZIP64Thresholds(maxUInt32: UInt32(int32Factor * int32Factor), maxUInt16: UInt16(int16Factor))
     }
 }
 

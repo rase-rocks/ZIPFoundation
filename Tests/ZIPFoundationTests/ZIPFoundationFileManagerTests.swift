@@ -153,7 +153,7 @@ extension ZIPFoundationTests {
         linkArchiveURL.appendPathComponent(self.archiveName(for: #function))
         let linkURL = linkArchiveURL.deletingLastPathComponent()
         let linkTarget = linkURL.path
-        let linkArchive = try XCTUnwrap(try? Archive(url: linkArchiveURL, accessMode: .create))
+        let linkArchive = try Archive(url: linkArchiveURL, accessMode: .create)
         try? linkArchive.addEntry(with: "link", type: .symlink, uncompressedSize: Int64(4),
                                   provider: { (_, _) -> Data in
             return Data(linkTarget.utf8)

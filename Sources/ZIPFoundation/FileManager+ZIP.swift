@@ -36,6 +36,16 @@ extension FileManager {
     public func zipItem(at sourceURL: URL, to destinationURL: URL,
                         shouldKeepParent: Bool = true, compressionMethod: CompressionMethod = .none,
                         progress: Progress? = nil) throws {
+        try self.zipItem(at: sourceURL, to: destinationURL, shouldKeepParent: shouldKeepParent,
+                         compressionMethod: compressionMethod, progress: progress,
+                         zip64Thresholds: .default)
+    }
+
+    // Internal entry point that allows tests to lower the ZIP64 field thresholds so that the
+    // ZIP64 code paths can be exercised without creating multi-gigabyte archives.
+    func zipItem(at sourceURL: URL, to destinationURL: URL,
+                 shouldKeepParent: Bool = true, compressionMethod: CompressionMethod = .none,
+                 progress: Progress? = nil, zip64Thresholds: ZIP64Thresholds) throws {
         let fileManager = FileManager()
         guard fileManager.itemExists(at: sourceURL) else {
             throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: sourceURL.path])
@@ -44,6 +54,7 @@ extension FileManager {
             throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: destinationURL.path])
         }
         let archive = try Archive(url: destinationURL, accessMode: .create)
+        archive.zip64Thresholds = zip64Thresholds
         let isDirectory = try FileManager.typeForItem(at: sourceURL) == .directory
         if isDirectory {
             var subPaths = try self.subpathsOfDirectory(atPath: sourceURL.path)

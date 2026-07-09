@@ -272,7 +272,8 @@ private extension Archive {
     func updateOffsetInCentralDirectory(centralDirectoryStructure: CentralDirectoryStructure,
                                         updatedOffset: UInt64) -> CentralDirectoryStructure {
         let zip64ExtendedInformation = Entry.ZIP64ExtendedInformation(
-            zip64ExtendedInformation: centralDirectoryStructure.zip64ExtendedInformation, offset: updatedOffset)
+            zip64ExtendedInformation: centralDirectoryStructure.zip64ExtendedInformation, offset: updatedOffset,
+            maxOffsetOfLocalFileHeader: self.maxOffsetOfLocalFileHeader)
         let offsetInCD = updatedOffset < maxOffsetOfLocalFileHeader ? UInt32(updatedOffset) : UInt32.max
         return CentralDirectoryStructure(centralDirectoryStructure: centralDirectoryStructure,
                                          zip64ExtendedInformation: zip64ExtendedInformation,
@@ -314,6 +315,9 @@ private extension Archive {
             archive = tempArchive
             url = tempDir
         }
+        // Propagate the ZIP64 field thresholds so the rewritten archive makes the same ZIP64
+        // decisions as the receiver (matters when tests lower the thresholds).
+        archive.zip64Thresholds = self.zip64Thresholds
         return (archive, url)
     }
 }

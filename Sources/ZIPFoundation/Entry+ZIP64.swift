@@ -125,7 +125,8 @@ extension Entry.ZIP64ExtendedInformation {
         self.diskNumberStart = value(of: .diskNumberStart)
     }
 
-    init?(zip64ExtendedInformation: Entry.ZIP64ExtendedInformation?, offset: UInt64) {
+    init?(zip64ExtendedInformation: Entry.ZIP64ExtendedInformation?, offset: UInt64,
+          maxOffsetOfLocalFileHeader: UInt32) {
         // Only used when removing entry, if no ZIP64 extended information exists,
         // then this information will not be newly added either
         guard let existingInfo = zip64ExtendedInformation else { return nil }

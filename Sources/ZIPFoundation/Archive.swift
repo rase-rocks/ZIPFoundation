@@ -149,6 +149,9 @@ public final class Archive: Sequence {
     var endOfCentralDirectoryRecord: EndOfCentralDirectoryRecord
     var zip64EndOfCentralDirectory: ZIP64EndOfCentralDirectory?
     var pathEncoding: String.Encoding?
+    /// The field-size thresholds that trigger ZIP64 extensions. Always the type maximums in
+    /// production; overridable in tests to exercise ZIP64 paths without multi-gigabyte archives.
+    var zip64Thresholds: ZIP64Thresholds = .default
 
     var totalNumberOfEntriesInCentralDirectory: UInt64 {
         zip64EndOfCentralDirectory?.record.totalNumberOfEntriesInCentralDirectory

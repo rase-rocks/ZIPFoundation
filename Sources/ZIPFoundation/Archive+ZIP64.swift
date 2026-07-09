@@ -138,13 +138,30 @@ extension Archive.ZIP64EndOfCentralDirectory {
     var data: Data { record.data + locator.data }
 }
 
-/// Properties that represent the maximum value of each field
-var maxUInt32 = UInt32.max
-var maxUInt16 = UInt16.max
+/// The maximum values each ZIP64-relevant field can hold before ZIP64 extensions are required.
+///
+/// These are always `UInt32.max` / `UInt16.max` in production. They are modeled as an injectable
+/// value (rather than global constants) so that tests can lower the thresholds to exercise the
+/// ZIP64 code paths without having to create multi-gigabyte archives.
+struct ZIP64Thresholds {
+    var maxUInt32: UInt32 = .max
+    var maxUInt16: UInt16 = .max
 
-var maxCompressedSize: UInt32 { maxUInt32 }
-var maxUncompressedSize: UInt32 { maxUInt32 }
-var maxOffsetOfLocalFileHeader: UInt32 { maxUInt32 }
-var maxOffsetOfCentralDirectory: UInt32 { maxUInt32 }
-var maxSizeOfCentralDirectory: UInt32 { maxUInt32 }
-var maxTotalNumberOfEntries: UInt16 { maxUInt16 }
+    var maxCompressedSize: UInt32 { maxUInt32 }
+    var maxUncompressedSize: UInt32 { maxUInt32 }
+    var maxOffsetOfLocalFileHeader: UInt32 { maxUInt32 }
+    var maxOffsetOfCentralDirectory: UInt32 { maxUInt32 }
+    var maxSizeOfCentralDirectory: UInt32 { maxUInt32 }
+    var maxTotalNumberOfEntries: UInt16 { maxUInt16 }
+
+    static let `default` = ZIP64Thresholds()
+}
+
+extension Archive {
+    var maxCompressedSize: UInt32 { self.zip64Thresholds.maxCompressedSize }
+    var maxUncompressedSize: UInt32 { self.zip64Thresholds.maxUncompressedSize }
+    var maxOffsetOfLocalFileHeader: UInt32 { self.zip64Thresholds.maxOffsetOfLocalFileHeader }
+    var maxOffsetOfCentralDirectory: UInt32 { self.zip64Thresholds.maxOffsetOfCentralDirectory }
+    var maxSizeOfCentralDirectory: UInt32 { self.zip64Thresholds.maxSizeOfCentralDirectory }
+    var maxTotalNumberOfEntries: UInt16 { self.zip64Thresholds.maxTotalNumberOfEntries }
+}

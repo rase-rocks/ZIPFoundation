@@ -327,7 +327,7 @@ extension ZIPFoundationTests {
                     let vol2Archive = try Archive(url: vol2ArchiveURL, accessMode: .create)
                     try vol1Archive.replaceCurrentArchive(with: vol2Archive)
                 } catch {
-                    type(of: self).tearDown()
+                    ZIPFoundationTests.tearDown()
                     XCTFail("\(String(describing: error))")
                     return
                 }
@@ -339,7 +339,7 @@ extension ZIPFoundationTests {
         }
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        waitForExpectations(timeout: 30.0)
+        self.wait(for: [createVolumeExpectation, unmountVolumeExpectation], timeout: 30.0)
 #endif
     }
 }
