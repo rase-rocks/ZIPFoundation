@@ -44,7 +44,16 @@ extension URL {
         // with single delimiters.
         // More details: https://github.com/weichsel/ZIPFoundation/issues/281
         let sanitizedEntryPathURL: URL = {
-            let sanitizedPath = self.path.replacingOccurrences(of: "//", with: "/")
+            var sanitizedPath = self.path
+            #if os(Windows)
+            // On Windows the kernel treats `\` as a path separator, so an entry path like
+            // `..\..\secret` would escape after `URL`/`fopen` expansion even though the check below
+            // sees `\` as an ordinary character. Normalize to `/` so the containment test is
+            // performed against the same separators the filesystem will use. (On POSIX, `\` is a
+            // legal filename character and must be left intact.)
+            sanitizedPath = sanitizedPath.replacingOccurrences(of: "\\", with: "/")
+            #endif
+            sanitizedPath = sanitizedPath.replacingOccurrences(of: "//", with: "/")
             return URL(fileURLWithPath: sanitizedPath)
         }()
         return sanitizedEntryPathURL.standardized.absoluteString.hasPrefix(parentDirectoryURL.absoluteString)

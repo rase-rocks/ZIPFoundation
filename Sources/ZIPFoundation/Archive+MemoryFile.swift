@@ -36,11 +36,19 @@ extension Archive {
             guard let result = mode.isWritable
                 ? funopen(cookie.toOpaque(), readStub, writeStub, seekStub, closeStub)
                 : funopen(cookie.toOpaque(), readStub, nil, seekStub, closeStub)
-            else { throw MemoryFileError.invalidMemoryFile }
+            else {
+                // `closeStub` (which balances this retain) is never called if the stream isn't
+                // created, so release the cookie here to avoid leaking `self`.
+                cookie.release()
+                throw MemoryFileError.invalidMemoryFile
+            }
             #else
             let stubs = cookie_io_functions_t(read: readStub, write: writeStub, seek: seekStub, close: closeStub)
             guard let result = fopencookie(cookie.toOpaque(), mode.posixMode, stubs)
-            else { throw MemoryFileError.invalidMemoryFile }
+            else {
+                cookie.release()
+                throw MemoryFileError.invalidMemoryFile
+            }
             #endif
             return result
         }
@@ -57,6 +65,10 @@ public enum MemoryFileError: Error {
 private extension Archive.MemoryFile {
 
     func readData(buffer: UnsafeMutableRawBufferPointer) -> Int {
+        // The cursor can legitimately sit at or past the end of the data (e.g. after a seek beyond
+        // EOF driven by a crafted archive offset). Reading there must yield zero bytes rather than
+        // letting `data.count - offset` go negative and produce an out-of-bounds copy range.
+        guard offset >= 0, offset <= data.count else { return 0 }
         let size = min(buffer.count, data.count-offset)
         let start = data.startIndex
         self.data.copyBytes(to: buffer.bindMemory(to: UInt8.self), from: start+offset..<start+offset+size)
@@ -65,6 +77,9 @@ private extension Archive.MemoryFile {
     }
 
     func writeData(buffer: UnsafeRawBufferPointer) -> Int {
+        // A negative cursor would produce out-of-bounds subrange arithmetic below. `seek` already
+        // rejects negative positions; this guard keeps the invariant local to the write path.
+        guard offset >= 0 else { return 0 }
         let start = self.data.startIndex
         if self.offset < self.data.count && self.offset+buffer.count > self.data.count {
             self.data.removeSubrange(start+self.offset..<start+self.data.count)
@@ -85,14 +100,21 @@ private extension Archive.MemoryFile {
     }
 
     func seek(offset: Int, whence: Int32) -> Int {
-        var result = -1
+        let result: Int
         if whence == SEEK_SET {
             result = offset
         } else if whence == SEEK_CUR {
             result = self.offset + offset
         } else if whence == SEEK_END {
             result = data.count + offset
+        } else {
+            return -1
         }
+        // A negative absolute position is invalid. Report an error (-1) without moving the cursor
+        // so that a crafted archive offset cannot drive `readData`/`writeData` out of bounds.
+        // Positions at or beyond the end remain valid (POSIX allows seeking past EOF); the read
+        // and write paths handle those cases safely.
+        guard result >= 0 else { return -1 }
         self.offset = result
         return self.offset
     }

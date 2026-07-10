@@ -35,6 +35,16 @@ extension Data {
     }
 
     func scanValue<T>(start: Int) -> T {
+        let size = MemoryLayout<T>.size
+        // `loadUnaligned` performs no bounds checking, so an out-of-range `start` (from malformed,
+        // attacker-controlled input) would read adjacent memory. Callers that parse fixed-layout
+        // structures validate sizes up front; this guard is defense-in-depth for any that don't:
+        // an out-of-bounds read yields a zero-filled value instead of undefined behavior.
+        guard start >= 0, start <= self.count - size else {
+            return [UInt8](repeating: 0, count: size).withUnsafeBytes {
+                $0.loadUnaligned(fromByteOffset: 0, as: T.self)
+            }
+        }
         return self.withUnsafeBytes {
             $0.loadUnaligned(fromByteOffset: start, as: T.self)
         }

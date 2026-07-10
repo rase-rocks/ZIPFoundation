@@ -32,11 +32,21 @@ extension Archive {
                         progress: Progress? = nil, with consumer: Consumer) throws -> CRC32 {
         let size = entry.centralDirectoryStructure.effectiveCompressedSize
         guard size <= .max else { throw ArchiveError.invalidEntrySize }
+        // Bound the inflated output to the size the entry declares. Without this, a "zip bomb"
+        // (a small deflate stream that inflates to many gigabytes) would stream unbounded output
+        // to the consumer/disk. On the CZLib path the decoder also otherwise keeps pulling input
+        // past the compressed size until `Z_STREAM_END`; this cap stops both cases early.
+        let maxUncompressedSize = entry.centralDirectoryStructure.effectiveUncompressedSize
+        var totalDecompressed = UInt64(0)
         return try Data.decompress(size: Int64(size), bufferSize: bufferSize, skipCRC32: skipCRC32,
                                    provider: { (_, chunkSize) -> Data in
                                     return try Data.readChunk(of: chunkSize, from: self.archiveFile)
                                    }, consumer: { (data) in
                                     if progress?.isCancelled == true { throw ArchiveError.cancelledOperation }
+                                    totalDecompressed += UInt64(data.count)
+                                    guard totalDecompressed <= maxUncompressedSize else {
+                                        throw ArchiveError.invalidEntrySize
+                                    }
                                     try consumer(data)
                                     progress?.completedUnitCount += Int64(data.count)
                                    })
@@ -53,6 +63,10 @@ extension Archive {
         case .none:
             let localFileHeader = entry.localFileHeader
             let size = Int(localFileHeader.compressedSize)
+            // A symbolic link target is a filesystem path, so it can never legitimately exceed
+            // `PATH_MAX`. Reject oversized declarations before allocating, so a crafted entry
+            // cannot force a huge single up-front allocation (memory-pressure DoS).
+            guard size <= maxSymlinkTargetLength else { throw ArchiveError.invalidEntrySize }
             let data = try Data.readChunk(of: size, from: self.archiveFile)
             checksum = data.crc32(checksum: 0)
             try consumer(data)

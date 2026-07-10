@@ -23,6 +23,9 @@ public let defaultFilePermissions = UInt16(0o644)
 public let defaultDirectoryPermissions = UInt16(0o755)
 let defaultPOSIXBufferSize = defaultReadChunkSize
 let defaultDirectoryUnitCount = Int64(1)
+/// The maximum accepted length (in bytes) of a stored symbolic-link target. A link target is a
+/// filesystem path, bounded by `PATH_MAX` (1024 on Darwin, 4096 on Linux); 4096 is a safe ceiling.
+let maxSymlinkTargetLength = 4096
 let minEndOfCentralDirectoryOffset = Int64(22)
 let maxDirectoryEndOffset = Int64(66000)
 let endOfCentralDirectoryStructSignature = 0x06054b50

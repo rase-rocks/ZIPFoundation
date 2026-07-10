@@ -43,6 +43,11 @@ extension Entry.InfoZIPUnicodePath {
             guard nextOffset <= extraFieldLength else { return nil }
 
             if headerID == Archive.ExtraFieldHeaderID.infoZIPUnicodePath.rawValue {
+                // The record must be large enough to hold the fixed part it declares:
+                // version (1 byte at offset 4) + nameCRC32 (4 bytes at offset 5). The variable
+                // UTF-8 name begins at offset 9. A shorter (attacker-crafted) record would cause
+                // an out-of-bounds read and an invalid `subdata` range below, so reject it.
+                guard nextOffset - offset >= 9 else { return nil }
                 let fieldData = data.subdata(in: offset..<nextOffset)
                 let version: UInt8 = fieldData.scanValue(start: 4)
                 let nameCRC32: UInt32 = fieldData.scanValue(start: 5)

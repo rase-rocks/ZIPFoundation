@@ -144,6 +144,11 @@ extension FileManager {
 
             func verifyChecksumIfNecessary() throws {
                 if skipCRC32 == false, crc32 != entry.checksum {
+                    // `extract` has already written the (corrupt or tampered) contents to disk. Remove
+                    // them so a failed integrity check never leaves a partial/malicious file behind.
+                    // Note: CRC32 detects accidental corruption; it is not an authenticity guarantee,
+                    // since the expected checksum comes from the same untrusted archive.
+                    try? fileManager.removeItem(at: entryURL)
                     throw Archive.ArchiveError.invalidCRC32
                 }
             }

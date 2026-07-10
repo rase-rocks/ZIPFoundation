@@ -250,7 +250,8 @@ extension ZIPFoundationTests {
             ("testLinuxTestSuiteIncludesAllTests", testLinuxTestSuiteIncludesAllTests),
             ("testFileModificationDate", testFileModificationDate),
             ("testFileModificationDateHelperMethods", testFileModificationDateHelperMethods),
-            ("testInvalidSymlinkCompressionMethodErrorConditions", testInvalidSymlinkCompressionMethodErrorConditions)
+            ("testInvalidSymlinkCompressionMethodErrorConditions", testInvalidSymlinkCompressionMethodErrorConditions),
+            ("testInfoZIPUnicodePathShortRecordIsRejected", testInfoZIPUnicodePathShortRecordIsRejected)
         ] + zip64Tests + darwinOnlyTests + posixOnlyTests + swift5OnlyTests
     }
 
@@ -343,7 +344,8 @@ extension ZIPFoundationTests {
             ("testWriteOnlyFile", testWriteOnlyFile),
             ("testReadOnlyFile", testReadOnlyFile),
             ("testReadOnlySlicedFile", testReadOnlySlicedFile),
-            ("testReadWriteFile", testReadWriteFile)
+            ("testReadWriteFile", testReadWriteFile),
+            ("testMemoryFileRejectsOutOfBoundsSeek", testMemoryFileRejectsOutOfBoundsSeek)
         ]
         #else
         return []
