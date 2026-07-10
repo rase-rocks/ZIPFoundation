@@ -345,7 +345,9 @@ extension ZIPFoundationTests {
             ("testReadOnlyFile", testReadOnlyFile),
             ("testReadOnlySlicedFile", testReadOnlySlicedFile),
             ("testReadWriteFile", testReadWriteFile),
-            ("testMemoryFileRejectsOutOfBoundsSeek", testMemoryFileRejectsOutOfBoundsSeek)
+            ("testMemoryFileRejectsOutOfBoundsSeek", testMemoryFileRejectsOutOfBoundsSeek),
+            ("testExtractRejectsEntryExceedingMaximumSize", testExtractRejectsEntryExceedingMaximumSize),
+            ("testReadStructRejectsOffsetBeyondSeekRange", testReadStructRejectsOffsetBeyondSeekRange)
         ]
         #else
         return []

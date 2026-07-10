@@ -127,7 +127,10 @@ private func harness(_ bytes: [UInt8]) {
         _ = entry.path
         _ = entry.checksum
         _ = entry.type
-        _ = try? archive.extract(entry, bufferSize: 4096, skipCRC32: false, consumer: { chunk in
+        // Exercise the library's absolute decompression cap: `maximumSize` should reject bomb
+        // entries up front instead of inflating for minutes. The consumer counter is a backstop.
+        _ = try? archive.extract(entry, bufferSize: 4096, skipCRC32: false,
+                                 maximumSize: perInputOutputCap, consumer: { chunk in
             produced += chunk.count
             if produced > perInputOutputCap { throw FuzzLimit.outputTooLarge }
         })
@@ -143,6 +146,19 @@ private func log(_ message: String) {
 }
 
 let args = CommandLine.arguments
+
+// Replay mode: `ZIPFuzz --replay <file>` runs the harness once on a saved reproducer, so a crash
+// produces a symbolicated backtrace pointing at the offending library line.
+if args.count > 2, args[1] == "--replay" {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: args[2])) else {
+        FileHandle.standardError.write(Data("ZIPFuzz: cannot read \(args[2])\n".utf8)); exit(2)
+    }
+    FileHandle.standardError.write(Data("ZIPFuzz: replaying \(data.count) bytes from \(args[2])\n".utf8))
+    harness([UInt8](data))
+    FileHandle.standardError.write(Data("ZIPFuzz: replay completed without crashing\n".utf8))
+    exit(0)
+}
+
 let corpusDir = args.count > 1 ? args[1] : "."
 let iterations = args.count > 2 ? (Int(args[2]) ?? 100_000) : 100_000
 let seed = args.count > 3 ? (UInt64(args[3]) ?? 1) : 1

@@ -63,5 +63,47 @@ extension ZIPFoundationTests {
         // A negative absolute position must be rejected without crashing.
         XCTAssertEqual(fseeko(file, -100, SEEK_SET), -1, "A negative absolute seek must be rejected")
     }
+
+    /// Regression test for the absolute decompression cap (`maximumSize`).
+    ///
+    /// A `maximumSize` smaller than the entry's uncompressed size must cause extraction to throw
+    /// `entryExceedsMaximumSize` (up front, on the declared size, before inflating), while the
+    /// default `.max` cap extracts the full payload unchanged.
+    func testExtractRejectsEntryExceedingMaximumSize() throws {
+        let archive = try Archive(data: Data(), accessMode: .create)
+        let payload = Data(repeating: 0x41, count: 8192)
+        try archive.addEntry(with: "big.txt", type: .file, uncompressedSize: Int64(payload.count),
+                             compressionMethod: .deflate, provider: { position, size in
+            let start = Int(position)
+            return payload.subdata(in: start..<start + size)
+        })
+        let entry = try XCTUnwrap(archive["big.txt"])
+
+        var produced = Data()
+        XCTAssertThrowsError(try archive.extract(entry, maximumSize: 1024, consumer: { produced.append($0) })) { error in
+            guard case Archive.ArchiveError.entryExceedsMaximumSize = error else {
+                return XCTFail("expected entryExceedsMaximumSize, got \(error)")
+            }
+        }
+        XCTAssertTrue(produced.isEmpty, "no bytes should be produced when the declared size exceeds the cap")
+
+        var full = Data()
+        _ = try archive.extract(entry, consumer: { full.append($0) })
+        XCTAssertEqual(full, payload, "default .max cap must extract the full payload")
+    }
+
+    /// Regression test for the ZIP64 offset integer-overflow trap found by fuzzing.
+    ///
+    /// `readStruct` seeks with `zip_off_t` (a signed type narrower than `UInt64`). A crafted ZIP64
+    /// offset above `zip_off_t.max` must be rejected (returns `nil`) rather than trapping in the
+    /// `zip_off_t(offset)` conversion ("Not enough bits to represent the passed value").
+    func testReadStructRejectsOffsetBeyondSeekRange() throws {
+        let memoryFile = Archive.MemoryFile(data: Data([0x00, 0x01, 0x02, 0x03]))
+        let file = try memoryFile.open(mode: .read)
+        defer { fclose(file) }
+        let record: Archive.EndOfCentralDirectoryRecord? =
+            Data.readStruct(from: file, at: UInt64(Int64.max) + 1)
+        XCTAssertNil(record, "An offset beyond zip_off_t.max must be rejected, not trap")
+    }
 }
 #endif

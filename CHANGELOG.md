@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+ - Added a `maximumSize` parameter to `Archive.extract(...)` that bounds the number of
+   uncompressed bytes an entry may produce, guarding against decompression ("zip") bombs.
+   Exceeding it throws the new `ArchiveError.entryExceedsMaximumSize(size:limit:)`. Defaults
+   to `.max`, preserving existing behavior.
+ - Added Swift 6 language-mode support (new `Package@swift-6.0.swift` manifest)
+
+### Security
+ - Fixed an out-of-bounds read / crash when parsing malformed Info-ZIP Unicode Path extra fields
+ - Fixed out-of-bounds access from unvalidated seek offsets in the in-memory `MemoryFile` backing store
+ - Fixed an integer-overflow crash on ZIP64 offsets exceeding the platform seek range in
+   `Data.readStruct` (found via fuzzing)
+ - Bounds-checked `Data.scanValue` against the buffer length
+ - Removed partially-extracted files when a CRC-32 check fails
+ - Clamped stored symbolic-link target size to `PATH_MAX`
+ - Normalized backslashes before the extraction containment check on Windows
+
+### Updated
+ - Released the in-memory stream cookie when stream creation fails (leak on error path)
+ - Made `Archive.ArchiveError` conform to `Equatable`
+
 ## [0.9.20](https://github.com/weichsel/ZIPFoundation/releases/tag/0.9.20)
 
 ### Added

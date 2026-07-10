@@ -68,7 +68,7 @@ public final class Archive: Sequence {
     typealias CentralDirectoryStructure = Entry.CentralDirectoryStructure
 
     /// An error that occurs during reading, creating or updating a ZIP file.
-    public enum ArchiveError: Error {
+    public enum ArchiveError: Error, Equatable {
         /// Thrown when an archive file is either damaged or inaccessible.
         case unreadableArchive
         /// Thrown when an archive is either opened with AccessMode.read or the destination file is unwritable.
@@ -99,6 +99,10 @@ public final class Archive: Sequence {
         case missingEndOfCentralDirectoryRecord
         /// Thrown when an entry contains a symlink pointing to a path outside the destination directory.
         case uncontainedSymlink
+        /// Thrown when an entry's uncompressed size (declared or as produced during extraction)
+        /// exceeds the `maximumSize` limit supplied to an extraction call. Used to bound
+        /// decompression so a small archive cannot inflate to an unbounded amount of data.
+        case entryExceedsMaximumSize(size: UInt64, limit: UInt64)
     }
 
     /// The access mode for an `Archive`.

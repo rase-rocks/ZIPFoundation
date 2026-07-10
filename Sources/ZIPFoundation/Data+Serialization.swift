@@ -52,7 +52,11 @@ extension Data {
 
     static func readStruct<T>(from file: FILEPointer, at offset: UInt64)
     -> T? where T: DataSerializable {
-        guard offset <= .max else { return nil }
+        // `zip_off_t` (the signed seek offset type) is narrower than `UInt64`. A crafted archive can
+        // supply a ZIP64 offset above `zip_off_t.max`; converting it directly would trap
+        // ("Not enough bits to represent the passed value"). Reject such offsets as unreadable.
+        // (The previous `offset <= .max` compared against `UInt64.max` and was always true.)
+        guard offset <= UInt64(zip_off_t.max) else { return nil }
         fseeko(file, zip_off_t(offset), SEEK_SET)
         guard let data = try? self.readChunk(of: T.size, from: file) else {
             return nil

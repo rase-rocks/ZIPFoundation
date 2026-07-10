@@ -18,6 +18,7 @@ To learn more about the performance characteristics of the framework, you can re
     - [Unzipping Archives](#unzipping-archives)
 - [Advanced Usage](#advanced-usage)
     - [Accessing individual Entries](#accessing-individual-entries)
+    - [Limiting Decompressed Size](#limiting-decompressed-size)
     - [Creating Archives](#creating-archives)
     - [Adding and Removing Entries](#adding-and-removing-entries)
     - [Closure based Reading and Writing](#closure-based-reading-and-writing)
@@ -183,6 +184,26 @@ do {
 
 The `extract` method accepts optional parameters that allow you to control compression and memory consumption.  
 You can find detailed information about that parameters in the method's documentation.
+
+### Limiting Decompressed Size
+
+When extracting entries from untrusted archives, use the `maximumSize` parameter to bound how many
+uncompressed bytes an entry is allowed to produce. This guards against decompression ("zip") bombs,
+where a small compressed entry inflates to a very large amount of data. If an entry's declared
+uncompressed size, or the amount actually produced during extraction, exceeds the limit, extraction
+throws `Archive.ArchiveError.entryExceedsMaximumSize(size:limit:)` instead of continuing:
+
+```swift
+do {
+    // Reject any entry that would expand to more than 50 MB.
+    try archive.extract(entry, to: destinationURL, maximumSize: 50 * 1024 * 1024)
+} catch Archive.ArchiveError.entryExceedsMaximumSize(let size, let limit) {
+    print("Refusing to extract entry: \(size) bytes exceeds the \(limit) byte limit")
+}
+```
+
+`maximumSize` is available on both the URL-based and closure-based `extract` methods and defaults to
+`.max`, so existing calls are unaffected.
 
 ### Creating Archives
 To create a new `Archive`, pass in a non-existing file URL and `AccessMode.create`.

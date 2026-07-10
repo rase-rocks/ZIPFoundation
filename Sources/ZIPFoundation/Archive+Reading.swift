@@ -29,6 +29,7 @@ extension Archive {
     public func extract(_ entry: Entry, to url: URL, bufferSize: Int = defaultReadChunkSize,
                         skipCRC32: Bool = false,
                         symlinksValidWithin: URL? = nil,
+                        maximumSize: Int = .max,
                         progress: Progress? = nil) throws -> CRC32 {
         guard bufferSize > 0 else {
             throw ArchiveError.invalidBufferSize
@@ -48,13 +49,13 @@ extension Archive {
             defer { fclose(destinationFile) }
             let consumer = { _ = try Data.write(chunk: $0, to: destinationFile) }
             checksum = try self.extract(entry, bufferSize: bufferSize, skipCRC32: skipCRC32,
-                                        progress: progress, consumer: consumer)
+                                        progress: progress, maximumSize: maximumSize, consumer: consumer)
         case .directory:
             let consumer = { (_: Data) in
                 try fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
             }
             checksum = try self.extract(entry, bufferSize: bufferSize, skipCRC32: skipCRC32,
-                                        progress: progress, consumer: consumer)
+                                        progress: progress, maximumSize: maximumSize, consumer: consumer)
         case .symlink:
             guard fileManager.itemExists(at: url) == false else {
                 throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: url.path])
@@ -72,7 +73,7 @@ extension Archive {
                 try fileManager.createSymbolicLink(atPath: url.path, withDestinationPath: linkPath)
             }
             checksum = try self.extract(entry, bufferSize: bufferSize, skipCRC32: skipCRC32,
-                                        progress: progress, consumer: consumer)
+                                        progress: progress, maximumSize: maximumSize, consumer: consumer)
         }
         try fileManager.transferAttributes(from: entry, toItemAtURL: url)
         return checksum
@@ -89,34 +90,56 @@ extension Archive {
     /// - Returns: The checksum of the processed content or 0 if the `skipCRC32` flag was set to `true`..
     /// - Throws: An error if the destination file cannot be written or the entry contains malformed content.
     public func extract(_ entry: Entry, bufferSize: Int = defaultReadChunkSize, skipCRC32: Bool = false,
-                        progress: Progress? = nil, consumer: Consumer) throws -> CRC32 {
+                        progress: Progress? = nil, maximumSize: Int = .max, consumer: Consumer) throws -> CRC32 {
         guard bufferSize > 0 else {
             throw ArchiveError.invalidBufferSize
         }
-        var checksum = CRC32(0)
-        let localFileHeader = entry.localFileHeader
-        guard entry.dataOffset <= .max else { throw ArchiveError.invalidLocalHeaderDataOffset }
-        fseeko(self.archiveFile, zip_off_t(entry.dataOffset), SEEK_SET)
-        progress?.totalUnitCount = self.totalUnitCountForReading(entry)
-        switch entry.type {
-        case .file:
-            guard let compressionMethod = CompressionMethod(rawValue: localFileHeader.compressionMethod) else {
-                throw ArchiveError.invalidCompressionMethod
-            }
-            switch compressionMethod {
-            case .none: checksum = try self.readUncompressed(entry: entry, bufferSize: bufferSize,
-                                                             skipCRC32: skipCRC32, progress: progress, with: consumer)
-            case .deflate: checksum = try self.readCompressed(entry: entry, bufferSize: bufferSize,
-                                                              skipCRC32: skipCRC32, progress: progress, with: consumer)
-            }
-        case .directory:
-            try consumer(Data())
-            progress?.completedUnitCount = self.totalUnitCountForReading(entry)
-        case .symlink:
-            checksum = try self.readSymbolicLink(entry: entry, bufferSize: bufferSize,
-                                                 skipCRC32: skipCRC32, progress: progress, with: consumer)
-
+        // Absolute decompression cap: bound the number of uncompressed bytes this call will produce,
+        // independent of the size the archive declares. This prevents a small "zip bomb" entry from
+        // inflating to an unbounded amount of data. `maximumSize` defaults to `.max`, preserving the
+        // previous unbounded behavior. Reject early on the declared size, then enforce the running
+        // total in case the declared size understates the actual output.
+        let limit = maximumSize < 0 ? 0 : UInt64(maximumSize)
+        if entry.uncompressedSize > limit {
+            throw ArchiveError.entryExceedsMaximumSize(size: entry.uncompressedSize, limit: limit)
         }
-        return checksum
+        guard entry.dataOffset <= .max else { throw ArchiveError.invalidLocalHeaderDataOffset }
+        // `withoutActuallyEscaping` lets the byte-counting wrapper close over the non-escaping
+        // `consumer` for the duration of extraction without changing the public signature.
+        return try withoutActuallyEscaping(consumer) { escapingConsumer -> CRC32 in
+            var producedByteCount = UInt64(0)
+            let boundedConsumer: Consumer = { data in
+                producedByteCount += UInt64(data.count)
+                if producedByteCount > limit {
+                    throw ArchiveError.entryExceedsMaximumSize(size: producedByteCount, limit: limit)
+                }
+                try escapingConsumer(data)
+            }
+            var checksum = CRC32(0)
+            let localFileHeader = entry.localFileHeader
+            fseeko(self.archiveFile, zip_off_t(entry.dataOffset), SEEK_SET)
+            progress?.totalUnitCount = self.totalUnitCountForReading(entry)
+            switch entry.type {
+            case .file:
+                guard let compressionMethod = CompressionMethod(rawValue: localFileHeader.compressionMethod) else {
+                    throw ArchiveError.invalidCompressionMethod
+                }
+                switch compressionMethod {
+                case .none: checksum = try self.readUncompressed(entry: entry, bufferSize: bufferSize,
+                                                                 skipCRC32: skipCRC32, progress: progress,
+                                                                 with: boundedConsumer)
+                case .deflate: checksum = try self.readCompressed(entry: entry, bufferSize: bufferSize,
+                                                                  skipCRC32: skipCRC32, progress: progress,
+                                                                  with: boundedConsumer)
+                }
+            case .directory:
+                try boundedConsumer(Data())
+                progress?.completedUnitCount = self.totalUnitCountForReading(entry)
+            case .symlink:
+                checksum = try self.readSymbolicLink(entry: entry, bufferSize: bufferSize,
+                                                     skipCRC32: skipCRC32, progress: progress, with: boundedConsumer)
+            }
+            return checksum
+        }
     }
 }
