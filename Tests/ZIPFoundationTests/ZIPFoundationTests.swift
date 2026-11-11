@@ -166,6 +166,13 @@ class ZIPFoundationTests: XCTestCase {
     }
 }
 
+// The bound is closed at both ends so that Swift 6.0 is the only toolchain whose
+// compilation this changes at all; Swift 5.10 builds in Swift 5 language mode, where the
+// inference never happens. Remove when Swift 6.0 leaves .github/workflows/CI.yml.
+#if compiler(>=6.0) && compiler(<6.1)
+extension ZIPFoundationTests: @unchecked Sendable {}
+#endif
+
 extension ZIPFoundationTests {
     // From https://oleb.net/blog/2017/03/keeping-xctest-in-sync/
     func testLinuxTestSuiteIncludesAllTests() {
