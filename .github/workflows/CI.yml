@@ -33,9 +33,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Oldest supported toolchain and latest point release per Xcode generation.
-          - { runner: macos-15, xcode: '16.0' }    # Swift 6.0
-          - { runner: macos-15, xcode: '16.4' }    # Swift 6.1
           - { runner: macos-26, xcode: '26.0.1' }  # Swift 6.2
           - { runner: macos-26, xcode: '26.6' }    # Swift 6.3
     runs-on: ${{ matrix.runner }}
