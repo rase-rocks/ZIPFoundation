@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0]
+
+First release of the `rase-rocks` fork, based on upstream `weichsel/ZIPFoundation`
+`development` at `e7a17d5` (after 0.9.20, which upstream has not yet released).
+The major version marks a breaking change relative to 0.9.20: the package now
+builds in Swift 6 language mode and raises its platform floors.
+
+### Removed
+ - Removed the hand-maintained `ZIPFoundation.xcodeproj` and with it Carthage support.
+   The project had drifted out of sync with the package manifests and was never built by CI.
+   Swift Package Manager is now the supported integration path.
 
 ### Added
  - Added a `maximumSize` parameter to `Archive.extract(...)` that bounds the number of

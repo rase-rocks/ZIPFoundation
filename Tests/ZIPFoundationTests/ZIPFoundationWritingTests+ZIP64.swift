@@ -287,8 +287,10 @@ extension ZIPFoundationTests {
         // testRemoveEntryFromArchiveWithZIP64EOCD.zip/
         //   ├─ data1.random (size: 64 * 32)
         //   ├─ data2.random (size: 64 * 32)
-        //   ├─ data3.random (size: 64 * 32) [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 4180, ..0]
-        //   ├─ data4.random (size: 64 * 32) [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 6270, ..0]
+        //   ├─ data3.random (size: 64 * 32)
+        //        [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 4180, ..0]
+        //   ├─ data4.random (size: 64 * 32)
+        //        [headerID: 1, dataSize: 8, ..0..0, relativeOffsetOfLocalHeader: 6270, ..0]
         let archive = self.archive(for: #function, mode: .update, zip64Thresholds: self.mockThresholds())
         guard let entry2 = archive["data2.random"] else {
             XCTFail("Failed to retrieve ZIP64 format entry from archive"); return

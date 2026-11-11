@@ -30,27 +30,32 @@ extension Archive {
             self.data = data
         }
 
-        func open(mode: AccessMode) throws -> FILEPointer {
+        /// Creates the userspace `FILE*` stream that is backed by this store.
+        ///
+        /// `makeStream` is injectable so that the stream-creation failure path can be covered by a
+        /// test: the real `funopen`/`fopencookie` cannot be driven to fail through any `AccessMode`.
+        func open(mode: AccessMode,
+                  makeStream: (UnsafeMutableRawPointer, AccessMode) -> FILEPointer?
+                      = MemoryFile.systemStream) throws -> FILEPointer {
             let cookie = Unmanaged.passRetained(self)
-            #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
-            guard let result = mode.isWritable
-                ? funopen(cookie.toOpaque(), readStub, writeStub, seekStub, closeStub)
-                : funopen(cookie.toOpaque(), readStub, nil, seekStub, closeStub)
-            else {
+            guard let result = makeStream(cookie.toOpaque(), mode) else {
                 // `closeStub` (which balances this retain) is never called if the stream isn't
                 // created, so release the cookie here to avoid leaking `self`.
                 cookie.release()
                 throw MemoryFileError.invalidMemoryFile
             }
+            return result
+        }
+
+        static func systemStream(cookie: UnsafeMutableRawPointer, mode: AccessMode) -> FILEPointer? {
+            #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
+            return mode.isWritable
+                ? funopen(cookie, readStub, writeStub, seekStub, closeStub)
+                : funopen(cookie, readStub, nil, seekStub, closeStub)
             #else
             let stubs = cookie_io_functions_t(read: readStub, write: writeStub, seek: seekStub, close: closeStub)
-            guard let result = fopencookie(cookie.toOpaque(), mode.posixMode, stubs)
-            else {
-                cookie.release()
-                throw MemoryFileError.invalidMemoryFile
-            }
+            return fopencookie(cookie, mode.posixMode, stubs)
             #endif
-            return result
         }
     }
 
@@ -62,7 +67,9 @@ public enum MemoryFileError: Error {
     case invalidMemoryFile
 }
 
-private extension Archive.MemoryFile {
+// Internal rather than private so that the bounds handling in `readData`, `writeData` and `seek`
+// can be unit tested directly. These remain invisible outside the module.
+extension Archive.MemoryFile {
 
     func readData(buffer: UnsafeMutableRawBufferPointer) -> Int {
         // The cursor can legitimately sit at or past the end of the data (e.g. after a seek beyond

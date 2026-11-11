@@ -1,10 +1,11 @@
 <img src="https://user-images.githubusercontent.com/1577319/27564151-1d99e3a0-5ad6-11e7-8ab6-417c5b5a3ff2.png" width="489"/>
 
 [![Swift Package Manager compatible](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://github.com/apple/swift-package-manager)
-[![Carthage compatible](https://img.shields.io/badge/Carthage-compatible-4BC51D.svg?style=flat)](https://github.com/Carthage/Carthage)
-[![CocoaPods Compatible](https://img.shields.io/cocoapods/v/ZIPFoundation.svg)](https://cocoapods.org/pods/ZIPFoundation)
-[![Platform](https://img.shields.io/badge/Platforms-macOS%20|%20iOS%20|%20tvOS%20|%20watchOS%20|%20visionOS%20|%20Linux-lightgrey.svg)](https://github.com/weichsel/ZIPFoundation)
-[![Twitter](https://img.shields.io/badge/twitter-@weichsel-blue.svg?style=flat)](http://twitter.com/weichsel)
+[![Platform](https://img.shields.io/badge/Platforms-macOS%20|%20iOS%20|%20tvOS%20|%20watchOS%20|%20visionOS%20|%20Linux-lightgrey.svg)](https://github.com/rase-rocks/ZIPFoundation)
+
+> **This is a fork.** It tracks [weichsel/ZIPFoundation](https://github.com/weichsel/ZIPFoundation)
+> and adds Swift 6 language-mode support plus hardening against malformed archives and
+> decompression bombs. Carthage is not supported; use Swift Package Manager.
 
 ZIP Foundation is a library to create, read and modify ZIP archive files.
 It is written in Swift and based on [Apple's libcompression](https://developer.apple.com/documentation/compression) for high performance and energy efficiency.
@@ -58,7 +59,7 @@ import PackageDescription
 let package = Package(
     name: "<Your Product Name>",
     dependencies: [
-		.package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMajor(from: "0.9.0"))
+		.package(url: "https://github.com/rase-rocks/ZIPFoundation.git", .upToNextMajor(from: "1.0.0"))
     ],
     targets: [
         .target(
@@ -74,37 +75,17 @@ After adding the dependency, you can fetch the library with:
 $ swift package resolve
 ```
 
-### Carthage
-
-[Carthage](https://github.com/Carthage/Carthage) is a decentralized dependency manager.  
-Installation instructions can be found in the project's [README file](https://github.com/Carthage/Carthage#installing-carthage).
-
-To integrate ZIPFoundation into your Xcode project using Carthage, you have to add it to your `Cartfile`:
-
-```ogdl
-github "weichsel/ZIPFoundation" ~> 0.9
-```
-
-After adding ZIPFoundation to the `Cartfile`, you have to fetch the sources by running:
-
-```bash
-carthage update --no-build
-```
-
-The fetched project has to be integrated into your workspace by dragging `ZIPFoundation.xcodeproj` to Xcode's Project Navigator. (See [official Carhage docs](https://github.com/Carthage/Carthage#adding-frameworks-to-an-application).)
-
 ### CocoaPods
 
 CocoaPods is a dependency manager for Objective-C and Swift.  
 To learn more about setting up your project for CocoaPods, please refer to the [official documentation](https://cocoapods.org/#install).  
-To integrate ZIP Foundation into your Xcode project using CocoaPods, you have to add it to your project's `Podfile`:
+This fork is not published to the CocoaPods trunk, so reference it by git tag in your project's `Podfile`:
 
 ```ruby
-source 'https://github.com/CocoaPods/Specs.git'
-platform :ios, '10.0'
+platform :ios, '15.0'
 use_frameworks!
 target '<Your Target Name>' do
-    pod 'ZIPFoundation', '~> 0.9'
+    pod 'ZIPFoundation', :git => 'https://github.com/rase-rocks/ZIPFoundation.git', :tag => '1.0.0'
 end
 ```
 
@@ -315,4 +296,4 @@ Twitter: [@weichsel](https://twitter.com/weichsel).
 ## License
 
 ZIP Foundation is released under the MIT License.  
-See [LICENSE](https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE) for details.
+See [LICENSE](LICENSE) for details.
