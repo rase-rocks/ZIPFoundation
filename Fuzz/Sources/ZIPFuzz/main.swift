@@ -57,8 +57,8 @@ private func pick(_ rng: inout XorShift64, _ upper: Int) -> Int {
 // MARK: - Corpus
 
 private func loadCorpus(_ dir: String) -> [[UInt8]] {
-    let fm = FileManager()
-    guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+    let fileManager = FileManager()
+    guard let names = try? fileManager.contentsOfDirectory(atPath: dir) else { return [] }
     var seeds: [[UInt8]] = []
     for name in names where name.hasSuffix(".zip") {
         let url = URL(fileURLWithPath: dir).appendingPathComponent(name)
@@ -71,6 +71,9 @@ private func loadCorpus(_ dir: String) -> [[UInt8]] {
 
 private let interestingBytes: [UInt8] = [0x00, 0xFF, 0x7F, 0x80, 0x01, 0x50, 0x4B, 0x05, 0x06, 0x01, 0x02, 0x03, 0x04]
 
+// A mutation dispatch switch: one arm per mutation strategy. Its complexity is the number of
+// strategies, so splitting it up to satisfy `cyclomatic_complexity` would only scatter the table.
+// swiftlint:disable:next cyclomatic_complexity
 private func mutate(_ seed: [UInt8], _ rng: inout XorShift64) -> [UInt8] {
     var bytes = seed
     if bytes.isEmpty { bytes = [0] }
@@ -78,29 +81,29 @@ private func mutate(_ seed: [UInt8], _ rng: inout XorShift64) -> [UInt8] {
     for _ in 0..<rounds {
         switch rng.next() % 7 {
         case 0: // single bit flip
-            let i = pick(&rng, bytes.count)
-            bytes[i] ^= UInt8(1 << (rng.next() % 8))
+            let index = pick(&rng, bytes.count)
+            bytes[index] ^= UInt8(1 << (rng.next() % 8))
         case 1: // random byte
             bytes[pick(&rng, bytes.count)] = UInt8(rng.next() & 0xFF)
         case 2: // interesting byte
             bytes[pick(&rng, bytes.count)] = interestingBytes[pick(&rng, interestingBytes.count)]
         case 3: // truncate
-            let n = pick(&rng, bytes.count)
-            bytes = Array(bytes.prefix(max(1, n)))
+            let length = pick(&rng, bytes.count)
+            bytes = Array(bytes.prefix(max(1, length)))
         case 4: // append random tail
             for _ in 0..<pick(&rng, 64) { bytes.append(UInt8(rng.next() & 0xFF)) }
         case 5: // overwrite a 32-bit little-endian field (sizes/offsets/lengths) with a wild value
             if bytes.count >= 4 {
-                let i = pick(&rng, bytes.count - 3)
-                let v = rng.next()
-                bytes[i] = UInt8(v & 0xFF); bytes[i + 1] = UInt8((v >> 8) & 0xFF)
-                bytes[i + 2] = UInt8((v >> 16) & 0xFF); bytes[i + 3] = UInt8((v >> 24) & 0xFF)
+                let index = pick(&rng, bytes.count - 3)
+                let value = rng.next()
+                bytes[index] = UInt8(value & 0xFF); bytes[index + 1] = UInt8((value >> 8) & 0xFF)
+                bytes[index + 2] = UInt8((value >> 16) & 0xFF); bytes[index + 3] = UInt8((value >> 24) & 0xFF)
             }
         default: // overwrite a 16-bit little-endian field (name/extra/comment lengths)
             if bytes.count >= 2 {
-                let i = pick(&rng, bytes.count - 1)
-                let v = rng.next()
-                bytes[i] = UInt8(v & 0xFF); bytes[i + 1] = UInt8((v >> 8) & 0xFF)
+                let index = pick(&rng, bytes.count - 1)
+                let value = rng.next()
+                bytes[index] = UInt8(value & 0xFF); bytes[index + 1] = UInt8((value >> 8) & 0xFF)
             }
         }
     }
@@ -173,14 +176,16 @@ installCrashHandlers()
 log("ZIPFuzz: \(corpus.count) seeds, \(iterations) iterations, seed \(seed), crashOut \(crashOut)")
 
 var rng = XorShift64(seed: seed)
-for i in 0..<iterations {
+for iteration in 0..<iterations {
     let input = mutate(corpus[pick(&rng, corpus.count)], &rng)
     // Stage the current input in the async-signal-safe buffer for the crash handler.
-    let n = min(input.count, gInputCap)
-    input.withUnsafeBytes { gInputBuf.update(from: $0.bindMemory(to: UInt8.self).baseAddress!, count: n) }
-    gInputLen = n
+    let stagedCount = min(input.count, gInputCap)
+    input.withUnsafeBytes {
+        gInputBuf.update(from: $0.bindMemory(to: UInt8.self).baseAddress!, count: stagedCount)
+    }
+    gInputLen = stagedCount
     harness(input)
-    if i % 1_000 == 0 { log("ZIPFuzz: iter \(i)") }
+    if iteration % 1_000 == 0 { log("ZIPFuzz: iter \(iteration)") }
 }
 
 log("ZIPFuzz: completed \(iterations) iterations with no crash (seed \(seed))")

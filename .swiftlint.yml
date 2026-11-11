@@ -1,0 +1,16 @@
+# SwiftLint configuration. CI runs `swiftlint lint --strict`, so every warning is an error.
+#
+# SwiftLint does not read .gitignore, so build directories have to be excluded by hand.
+# Without this it lints SwiftPM's generated sources (resource_bundle_accessor.swift,
+# runner.swift, test_entry_point.swift) and reports well over a hundred violations that
+# nobody can fix. Those files are absent in CI, which checks out fresh, but they make the
+# linter unusable locally.
+excluded:
+  - .build
+  - Fuzz/.build
+
+# Sources/ZIPFoundation/FileManager+ZIP.swift is 411 lines. Splitting it would buy a
+# recurring merge conflict with upstream, which edits that file, in exchange for 11 lines.
+file_length:
+  warning: 450
+  error: 1000
