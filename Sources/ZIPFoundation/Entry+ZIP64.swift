@@ -50,11 +50,20 @@ extension Entry.LocalFileHeader {
 
 extension Entry.CentralDirectoryStructure {
     var validFields: [Field] {
+        Self.placeholderFields(uncompressedSize: self.uncompressedSize, compressedSize: self.compressedSize,
+                               relativeOffsetOfLocalHeader: self.relativeOffsetOfLocalHeader,
+                               diskNumberStart: self.diskNumberStart)
+    }
+
+    /// The fields whose header value is the ZIP64 placeholder, in the order their values appear in the
+    /// ZIP64 extended information.
+    static func placeholderFields(uncompressedSize: UInt32, compressedSize: UInt32,
+                                  relativeOffsetOfLocalHeader: UInt32, diskNumberStart: UInt16) -> [Field] {
         var fields: [Field] = []
-        if self.uncompressedSize == .max { fields.append(.uncompressedSize) }
-        if self.compressedSize == .max { fields.append(.compressedSize) }
-        if self.relativeOffsetOfLocalHeader == .max { fields.append(.relativeOffsetOfLocalHeader) }
-        if self.diskNumberStart == .max { fields.append(.diskNumberStart) }
+        if uncompressedSize == .max { fields.append(.uncompressedSize) }
+        if compressedSize == .max { fields.append(.compressedSize) }
+        if relativeOffsetOfLocalHeader == .max { fields.append(.relativeOffsetOfLocalHeader) }
+        if diskNumberStart == .max { fields.append(.diskNumberStart) }
         return fields
     }
     var zip64ExtendedInformation: Entry.ZIP64ExtendedInformation? {
@@ -103,6 +112,42 @@ extension Entry.ZIP64ExtendedInformation {
         return data
     }
 
+    /// Serializes the values of `fields` only. Unlike `data`, this writes a value even when it is zero:
+    /// a ZIP64 field must hold a value for every header field that contains the placeholder.
+    func data(for fields: [Field]) -> Data {
+        var data = Data()
+        func append<T: FixedWidthInteger>(_ value: T) {
+            withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        }
+        append(self.headerID)
+        append(UInt16(fields.reduce(0, { $0 + $1.size })))
+        if fields.contains(.uncompressedSize) { append(self.uncompressedSize) }
+        if fields.contains(.compressedSize) { append(self.compressedSize) }
+        if fields.contains(.relativeOffsetOfLocalHeader) { append(self.relativeOffsetOfLocalHeader) }
+        if fields.contains(.diskNumberStart) { append(self.diskNumberStart) }
+        return data
+    }
+
+    /// Returns `extraFieldData` without its ZIP64 extended information, keeping every other extra field.
+    /// Trailing bytes that do not form a complete field are kept as they are.
+    static func removingZIP64Field(from extraFieldData: Data) -> Data {
+        var result = Data()
+        var offset = 0
+        let headerSize = Int(Self.headerSize)
+        while offset + headerSize <= extraFieldData.count {
+            let headerID: UInt16 = extraFieldData.scanValue(start: offset)
+            let dataSize: UInt16 = extraFieldData.scanValue(start: offset + 2)
+            let nextOffset = offset + headerSize + Int(dataSize)
+            guard nextOffset <= extraFieldData.count else { break }
+            if headerID != Archive.ExtraFieldHeaderID.zip64ExtendedInformation.rawValue {
+                result.append(extraFieldData.subdata(in: offset..<nextOffset))
+            }
+            offset = nextOffset
+        }
+        result.append(extraFieldData.subdata(in: offset..<extraFieldData.count))
+        return result
+    }
+
     init?(data: Data, fields: [Field]) {
         let headerLength = 4
         guard fields.reduce(0, { $0 + $1.size }) + headerLength == data.count else { return nil }
@@ -128,17 +173,15 @@ extension Entry.ZIP64ExtendedInformation {
     init?(zip64ExtendedInformation: Entry.ZIP64ExtendedInformation?, offset: UInt64,
           maxOffsetOfLocalFileHeader: UInt32) {
         // Only used when removing entry, if no ZIP64 extended information exists,
-        // then this information will not be newly added either
+        // then this information will not be newly added either.
+        // A value can be zero and still belong in the rewritten field, so this keeps every value. The
+        // rewritten central directory record writes the ones its placeholders need, with `data(for:)`.
         guard let existingInfo = zip64ExtendedInformation else { return nil }
         relativeOffsetOfLocalHeader = offset >= maxOffsetOfLocalFileHeader ? offset : 0
         uncompressedSize = existingInfo.uncompressedSize
         compressedSize = existingInfo.compressedSize
         diskNumberStart = existingInfo.diskNumberStart
-        let tempDataSize = [relativeOffsetOfLocalHeader, uncompressedSize, compressedSize]
-            .filter { $0 != 0 }
-            .reduce(UInt16(0), { $0 + UInt16(MemoryLayout.size(ofValue: $1))})
-        dataSize = tempDataSize + (diskNumberStart > 0 ? UInt16(MemoryLayout.size(ofValue: diskNumberStart)) : 0)
-        if dataSize == 0 { return nil }
+        dataSize = existingInfo.dataSize
     }
 
     static func scanForZIP64Field(in data: Data, fields: [Field]) -> Entry.ZIP64ExtendedInformation? {

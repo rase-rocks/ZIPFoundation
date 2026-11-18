@@ -356,7 +356,11 @@ extension ZIPFoundationTests {
             ("testReadWriteFile", testReadWriteFile),
             ("testMemoryFileRejectsOutOfBoundsSeek", testMemoryFileRejectsOutOfBoundsSeek),
             ("testExtractRejectsEntryExceedingMaximumSize", testExtractRejectsEntryExceedingMaximumSize),
-            ("testReadStructRejectsOffsetBeyondSeekRange", testReadStructRejectsOffsetBeyondSeekRange)
+            ("testReadStructRejectsOffsetBeyondSeekRange", testReadStructRejectsOffsetBeyondSeekRange),
+            ("testRemoveEntryKeepsStoredEmptyZIP64EntryReadable", testRemoveEntryKeepsStoredEmptyZIP64EntryReadable),
+            ("testRemoveEntryKeepsDeflatedEmptyZIP64EntryReadable",
+             testRemoveEntryKeepsDeflatedEmptyZIP64EntryReadable),
+            ("testRemoveEntryKeepsOtherExtraFieldsOfZIP64Entry", testRemoveEntryKeepsOtherExtraFieldsOfZIP64Entry)
         ]
         #else
         return []

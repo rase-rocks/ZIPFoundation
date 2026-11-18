@@ -275,15 +275,27 @@ extension Entry.CentralDirectoryStructure {
 
     init(centralDirectoryStructure: Entry.CentralDirectoryStructure,
          zip64ExtendedInformation: Entry.ZIP64ExtendedInformation?, relativeOffset: UInt32) {
+        // The rewritten ZIP64 field holds a value for exactly the header fields that contain the
+        // placeholder, including values of zero. Other extra fields are kept.
+        let zip64Fields = Self.placeholderFields(uncompressedSize: centralDirectoryStructure.uncompressedSize,
+                                                 compressedSize: centralDirectoryStructure.compressedSize,
+                                                 relativeOffsetOfLocalHeader: relativeOffset,
+                                                 diskNumberStart: centralDirectoryStructure.diskNumberStart)
+        let existingVersion = centralDirectoryStructure.versionNeededToExtract
         if let existingInfo = zip64ExtendedInformation {
-            self.extraFieldData = existingInfo.data
-            self.versionNeededToExtract = max(centralDirectoryStructure.versionNeededToExtract,
-                                              Archive.Version.v45.rawValue)
+            let otherExtraFields = Entry.ZIP64ExtendedInformation
+                .removingZIP64Field(from: centralDirectoryStructure.extraFieldData)
+            self.extraFieldData = zip64Fields.isEmpty
+                ? otherExtraFields
+                : otherExtraFields + existingInfo.data(for: zip64Fields)
         } else {
             self.extraFieldData = centralDirectoryStructure.extraFieldData
-            let existingVersion = centralDirectoryStructure.versionNeededToExtract
+        }
+        if zip64ExtendedInformation != nil, zip64Fields.isEmpty == false {
+            self.versionNeededToExtract = max(existingVersion, Archive.Version.v45.rawValue)
+        } else {
             self.versionNeededToExtract = existingVersion < Archive.Version.v45.rawValue
-                ? centralDirectoryStructure.versionNeededToExtract
+                ? existingVersion
                 : Archive.Version.v20.rawValue
         }
         self.extraFieldLength = UInt16(extraFieldData.count)

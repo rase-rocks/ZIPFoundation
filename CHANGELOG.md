@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.1]
+
+Brings in upstream commit `e9dec3a` (weichsel/ZIPFoundation#378) ahead of an upstream
+release, with a matching fix on the writing side.
+
+### Fixed
+ - Fixed reading ZIP64 entries whose ZIP64 extended information holds a size or offset of 0.
+   A ZIP64 value now applies when its 32-bit field holds the placeholder `0xFFFFFFFF`, not
+   when the value is non-zero. Archives whose first entry carries its offset in the ZIP64
+   field used to list no entries. (upstream #378)
+ - Accepted ZIP64 end of central directory records whose version needed to extract is below
+   4.5, as some producers write them. (upstream #378)
+ - Fixed removing an entry from an archive whose other entries carry zero values in their
+   ZIP64 extended information. The rewritten central directory record now holds a ZIP64 value
+   for every field that contains the placeholder. Such entries used to read back with a size
+   of `0xFFFFFFFF`.
+ - Kept the other extra fields of an entry with ZIP64 extended information, such as timestamps
+   or the Info-ZIP Unicode path, when removing a different entry. They used to be dropped.
+
 ## [1.0.0]
 
 First release of the `rase-rocks` fork, based on upstream `weichsel/ZIPFoundation`
