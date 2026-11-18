@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0]
 
 Merges upstream `weichsel/ZIPFoundation` `main` at `ab380fc`, which includes every change
 listed under upstream 0.9.21 below. Where upstream and the fork fixed the same problem,
