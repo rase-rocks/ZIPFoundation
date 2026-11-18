@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
@@ -312,6 +312,43 @@ extension ZIPFoundationTests {
             XCTFail("Failed to retrieve ZIP64 format entry from archive"); return
         }
         XCTAssertEqual(entry4.zip64ExtendedInformation?.relativeOffsetOfLocalHeader, entry3OriginalOffset)
+    }
+
+    func testRemoveZIP64EntryPreservesExtraFields() throws {
+        // The second entry has ZIP64 extended information and an Info-ZIP Unicode Path extra field in both headers.
+        let archive = self.archive(for: #function, mode: .update)
+        let paths = archive.map { $0.path }
+        XCTAssertEqual(paths.count, 2)
+        let extraFieldData = try XCTUnwrap(archive[paths[1]]).centralDirectoryStructure.extraFieldData
+        try archive.remove(XCTUnwrap(archive[paths[0]]))
+        // Rewriting the central directory keeps all extra fields of entries with ZIP64 extended information.
+        XCTAssertEqual(archive.map { $0.path }, [paths[1]])
+        let entry = try XCTUnwrap(archive[paths[1]])
+        XCTAssertEqual(entry.centralDirectoryStructure.extraFieldData, extraFieldData)
+        XCTAssertNotNil(entry.zip64ExtendedInformation)
+        XCTAssert(archive.checkIntegrity())
+        let reopenedArchive = try Archive(url: archive.url, accessMode: .read)
+        XCTAssertEqual(reopenedArchive.map { $0.path }, [paths[1]])
+    }
+
+    func testRemoveEntryUpdatesSizeOfCentralDirectory() throws {
+        let archive = self.archive(for: #function, mode: .create, zip64Thresholds: self.mockThresholds())
+        let size = 5000
+        let data = Data.makeRandomData(size: size)
+        try archive.addFileEntry(with: "first", size: size, data: data)
+        try archive.addFileEntry(with: "second", size: size, data: data)
+        // The second entry needs ZIP64 extended information for its sizes and its offset.
+        let extraFieldLength = archive["second"]?.centralDirectoryStructure.extraFieldLength
+        XCTAssertEqual(extraFieldLength, 28)
+        try archive.remove(XCTUnwrap(archive["first"]))
+        // The offset no longer needs ZIP64 extended information. The central directory structure gets smaller.
+        XCTAssertEqual(archive["second"]?.centralDirectoryStructure.extraFieldLength, 20)
+        let sizeOfCentralDirectory = archive.reduce(0, { $0 + $1.centralDirectoryStructure.data.count })
+        XCTAssertEqual(archive.sizeOfCentralDirectory, UInt64(sizeOfCentralDirectory))
+        // Adding an entry relies on the size of the central directory.
+        try archive.addFileEntry(with: "third", size: size, data: data)
+        XCTAssertEqual(archive.map { $0.path }, ["second", "third"])
+        XCTAssert(archive.checkIntegrity())
     }
 }
 

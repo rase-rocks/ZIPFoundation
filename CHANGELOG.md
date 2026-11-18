@@ -1,5 +1,52 @@
 # Changelog
 
+## [Unreleased]
+
+Merges upstream `weichsel/ZIPFoundation` `main` at `ab380fc`, which includes every change
+listed under upstream 0.9.21 below. Where upstream and the fork fixed the same problem,
+upstream's fix is kept unless the fork's was stricter.
+
+### Removed
+ - Removed Info-ZIP Unicode Path support, following upstream. Entry paths are decoded from
+   the central directory file name again. The fork's bounds check for that extra field goes
+   with it.
+
+### Fixed
+ - Fixed the central directory size recorded after removing an entry when the records of
+   other entries changed size. An entry added afterwards used to be lost. (upstream)
+ - Replaced the fork's rewrite of ZIP64 extended information on removal with upstream's,
+   which also adds ZIP64 extended information to entries moved behind the maximum offset.
+ - Rejected entries that declare an uncompressed size beyond `Int64.max` with
+   `invalidEntrySize` instead of `entryExceedsMaximumSize`.
+
+### Updated
+ - Made `Package@swift-6.4.swift`, added upstream, build in Swift 6 language mode like
+   `Package@swift-6.0.swift`. Upstream's version uses Swift 5.
+ - Kept the fork's checks where they are stricter than upstream's: the bound on inflated
+   output, the removal of files that fail their CRC-32 check, the Windows path separator
+   handling (now applied to upstream's symlink-aware containment check) and the seek-range
+   check in `Data.readStruct`.
+ - Replaced the fork's symlink target limit with upstream's equivalent, which also reads
+   stored destinations in chunks.
+
+### Upstream 0.9.21
+ - Added support for compressed symlinks
+ - Added `symlinksValidWithin` parameter to control symlink containment
+ - Added support for symlink modification dates on Linux
+ - Added initial support for building for Windows
+ - Added package manifest for Swift 6.4
+ - Fixed symlink containment bypass via chained symlinks
+ - Fixed crashes and endless loops when reading malformed archives
+ - Fixed crash when adding entries to archives with an invalid central directory
+ - Fixed data loss and invalid offsets when removing entries
+ - Fixed sizes of ZIP64 entries with 4 byte data descriptors
+ - Fixed reading of ZIP64 archives with a low "version needed to extract"
+ - Fixed detection of directory entries with a trailing path delimiter
+ - Fixed memory growth and slow opening of archives with many entries
+ - Fixed build errors on Android
+ - Fixed warnings in package manifest
+ - Improved path traversal checks for entries and symlinks during extraction
+
 ## [1.0.1]
 
 Brings in upstream commit `e9dec3a` (weichsel/ZIPFoundation#378) ahead of an upstream

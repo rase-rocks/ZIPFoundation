@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
@@ -48,6 +48,8 @@ extension ZIPFoundationTests {
     }
 
     func testSymlinkPermissionsTransferErrorConditions() {
+        // Applying permissions on symlinks is only relevant on Darwin platforms.
+#if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
         let fileManager = FileManager()
         let assetURL = self.resourceURL(for: #function, pathExtension: "png")
         XCTAssertSwiftError(try fileManager.setAttributes([:], ofItemAtURL: assetURL, traverseLink: false),
@@ -59,6 +61,7 @@ extension ZIPFoundationTests {
         XCTAssertPOSIXError(try fileManager.setAttributes([.posixPermissions: permissions],
                                                           ofItemAtURL: nonExistentURL, traverseLink: false),
                             throwsErrorWithCode: .ENOENT)
+#endif
     }
 
     func testSymlinkModificationDateTransferErrorConditions() {
@@ -74,17 +77,15 @@ extension ZIPFoundationTests {
                             throws: Entry.EntryError.missingModificationDateAttributeError)
         XCTAssertPOSIXError(try fileManager.setSymlinkModificationDate(Date(), ofItemAtURL: nonExistentURL),
                             throwsErrorWithCode: .ENOENT)
-        XCTAssertPOSIXError(
-            try fileManager.setAttributes(
-                [
-                    .posixPermissions: providedPermissions,
-                    .modificationDate: Date()
-                ],
-                ofItemAtURL: nonExistentURL,
-                traverseLink: false
-            ),
-            throwsErrorWithCode: .ENOENT
-        )
+        let attributes: [FileAttributeKey: Any] = [.posixPermissions: providedPermissions, .modificationDate: Date()]
+#if os(Linux)
+        // Setting the modification date of a symlink is best effort on Linux.
+        XCTAssertNoThrow(try fileManager.setAttributes(attributes, ofItemAtURL: nonExistentURL, traverseLink: false))
+#else
+        XCTAssertPOSIXError(try fileManager.setAttributes(attributes, ofItemAtURL: nonExistentURL,
+                                                          traverseLink: false),
+                            throwsErrorWithCode: .ENOENT)
+#endif
 #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
         var resourceValues = URLResourceValues()
         resourceValues.isUserImmutable = true

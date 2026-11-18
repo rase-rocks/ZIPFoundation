@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -75,7 +75,7 @@ extension Archive.MemoryFile {
         // The cursor can legitimately sit at or past the end of the data (e.g. after a seek beyond
         // EOF driven by a crafted archive offset). Reading there must yield zero bytes rather than
         // letting `data.count - offset` go negative and produce an out-of-bounds copy range.
-        guard offset >= 0, offset <= data.count else { return 0 }
+        guard offset >= 0, offset < data.count else { return 0 }
         let size = min(buffer.count, data.count-offset)
         let start = data.startIndex
         self.data.copyBytes(to: buffer.bindMemory(to: UInt8.self), from: start+offset..<start+offset+size)

@@ -13,32 +13,6 @@ import XCTest
 
 extension ZIPFoundationTests {
 
-    /// Regression test for the Info-ZIP Unicode Path extra-field parser (H1).
-    ///
-    /// A record that declares a `dataSize` too small to hold its fixed part (version + nameCRC32,
-    /// i.e. fewer than 9 bytes total) must be rejected instead of triggering an out-of-bounds read
-    /// (`scanValue(start: 5)`) and an invalid `subdata(in: 9..<count)` range. A well-formed record
-    /// must still parse.
-    func testInfoZIPUnicodePathShortRecordIsRejected() {
-        // headerID 0x7075 (little-endian), dataSize = 1, one payload byte → 5-byte field total.
-        let malformed = Data([0x75, 0x70, 0x01, 0x00, 0xAA])
-        XCTAssertNil(Entry.InfoZIPUnicodePath.scanForUnicodePath(in: malformed),
-                     "Undersized Info-ZIP Unicode Path record must be rejected, not read out of bounds")
-
-        // A boundary-sized record (dataSize == 5: version + 4-byte CRC, empty name) is valid.
-        let minimalValid = Data([0x75, 0x70, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00])
-        let parsedMinimal = Entry.InfoZIPUnicodePath.scanForUnicodePath(in: minimalValid)
-        XCTAssertNotNil(parsedMinimal)
-        XCTAssertEqual(parsedMinimal?.unicodeName.count, 0)
-
-        // A record with a one-byte name must parse and expose that name.
-        let valid = Data([0x75, 0x70, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x41])
-        let parsed = Entry.InfoZIPUnicodePath.scanForUnicodePath(in: valid)
-        XCTAssertNotNil(parsed)
-        XCTAssertEqual(parsed?.dataSize, 6)
-        XCTAssertEqual(parsed?.unicodeName, Data([0x41]))
-    }
-
     /// Regression test for the bounds check in `Data.scanValue(start:)`.
     ///
     /// `loadUnaligned` performs no bounds checking of its own, so an offset taken from a malformed,

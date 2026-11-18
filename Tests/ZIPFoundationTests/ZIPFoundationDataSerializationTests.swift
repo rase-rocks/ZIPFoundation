@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
@@ -26,10 +26,14 @@ extension ZIPFoundationTests {
         XCTAssert(result == true)
         let fileSystemRepresentation = fileManager.fileSystemRepresentation(withPath: fileURL.path)
         let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
-        // Close the file to exercise the error path during readStructure that deals with
-        // unreadable file data.
+        let unreachableStructure: Entry.CentralDirectoryStructure? = Data.readStruct(from: file, at: .max)
+        XCTAssertNil(unreachableStructure)
         fclose(file)
-        let centralDirectoryStructure: Entry.CentralDirectoryStructure? = Data.readStruct(from: file, at: 0)
+        // Use a write-only file to exercise the error path during readStructure that deals with
+        // unreadable file data.
+        let writeOnlyFile: FILEPointer = fopen(fileSystemRepresentation, "wb")
+        defer { fclose(writeOnlyFile) }
+        let centralDirectoryStructure: Entry.CentralDirectoryStructure? = Data.readStruct(from: writeOnlyFile, at: 0)
         XCTAssertNil(centralDirectoryStructure)
     }
 
@@ -42,10 +46,10 @@ extension ZIPFoundationTests {
                                             attributes: nil)
         XCTAssert(result == true)
         let fileSystemRepresentation = fileManager.fileSystemRepresentation(withPath: fileURL.path)
-        let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
-        // Close the file to exercise the error path during readChunk that deals with
+        // Use a write-only file to exercise the error path during readChunk that deals with
         // unreadable file data.
-        fclose(file)
+        let file: FILEPointer = fopen(fileSystemRepresentation, "wb")
+        defer { fclose(file) }
         XCTAssertSwiftError(try Data.readChunk(of: 10, from: file),
                             throws: Data.DataError.unreadableFile)
     }
@@ -59,10 +63,10 @@ extension ZIPFoundationTests {
                                             attributes: nil)
         XCTAssert(result == true)
         let fileSystemRepresentation = fileManager.fileSystemRepresentation(withPath: fileURL.path)
-        let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
-        // Close the file to exercise the error path during writeChunk that deals with
+        // Use a read-only file to exercise the error path during writeChunk that deals with
         // unwritable files.
-        fclose(file)
+        let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
+        defer { fclose(file) }
         XCTAssertSwiftError(try Data.write(chunk: Data(count: 10), to: file),
                             throws: Data.DataError.unwritableFile)
     }
@@ -107,12 +111,23 @@ extension ZIPFoundationTests {
                                             attributes: nil)
         XCTAssert(result == true)
         let fileSystemRepresentation = fileManager.fileSystemRepresentation(withPath: fileURL.path)
-        let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
-        let data = Data.makeRandomData(size: 1024)
-        // Close the file to exercise the error path during writeChunk that deals with
+        // Use a read-only file to exercise the error path during writeChunk that deals with
         // unwritable files.
-        fclose(file)
+        let file: FILEPointer = fopen(fileSystemRepresentation, "rb")
+        defer { fclose(file) }
+        let data = Data.makeRandomData(size: 1024)
         XCTAssertSwiftError(try Data.writeLargeChunk(data, size: 1024, bufferSize: 256, to: file),
                             throws: Data.DataError.unwritableFile)
+    }
+}
+
+extension Data {
+    static func makeRandomData(size: Int) -> Data {
+        #if os(macOS) || os(iOS) || os(watchOS) || os(tvOS) || os(visionOS)
+        let bytes = [UInt32](repeating: 0, count: size).map { _ in UInt32.random(in: 0...UInt32.max) }
+        #else
+        let bytes = [UInt32](repeating: 0, count: size).map { _ in random() }
+        #endif
+        return Data(bytes: bytes, count: size)
     }
 }

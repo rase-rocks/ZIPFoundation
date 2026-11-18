@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
@@ -233,6 +233,35 @@ extension ZIPFoundationTests {
         XCTAssert(archive.checkIntegrity())
     }
 
+    func testRemoveEntryWithReorderedCentralDirectory() throws {
+        // The entries are stored as "a.txt", "b.txt", "c.txt", "d.txt". The central directory lists them
+        // in a different order.
+        let paths = ["b.txt", "d.txt", "a.txt", "c.txt"]
+        for path in paths {
+            let archive = self.archive(for: #function, mode: .update)
+            XCTAssertEqual(archive.map { $0.path }, paths)
+            try archive.remove(XCTUnwrap(archive[path]))
+            XCTAssertEqual(archive.map { $0.path }, paths.filter { $0 != path })
+            XCTAssert(archive.checkIntegrity())
+            let reopenedArchive = try Archive(url: archive.url, accessMode: .read)
+            XCTAssertEqual(reopenedArchive.map { $0.path }, paths.filter { $0 != path })
+            XCTAssert(reopenedArchive.checkIntegrity())
+        }
+        // An entry without ZIP64 extended information can be moved behind the maximum offset.
+        let archive = self.archive(for: #function, mode: .read)
+        let structure = try XCTUnwrap(archive["a.txt"]).centralDirectoryStructure
+        XCTAssertNil(structure.zip64ExtendedInformation)
+        let offset = UInt64(UInt32.max) + 1
+        let movedStructure = try XCTUnwrap(Entry.CentralDirectoryStructure(centralDirectoryStructure: structure,
+                                                                           updatedOffset: offset))
+        XCTAssertEqual(movedStructure.relativeOffsetOfLocalHeader, .max)
+        XCTAssertEqual(movedStructure.effectiveRelativeOffsetOfLocalHeader, offset)
+        XCTAssertEqual(movedStructure.versionNeededToExtract & 0xff, Archive.Version.v45.rawValue)
+        // The existing extra fields follow the new ZIP64 extended information.
+        XCTAssertEqual(movedStructure.extraFieldData.suffix(structure.extraFieldData.count), structure.extraFieldData)
+        XCTAssertEqual(Int(movedStructure.extraFieldLength), structure.extraFieldData.count + 12)
+    }
+
     func testRemoveDataDescriptorCompressedEntry() {
         let archive = self.archive(for: #function, mode: .update)
         guard let entryToRemove = archive["second.txt"] else {
@@ -343,3 +372,22 @@ extension ZIPFoundationTests {
 #endif
     }
 }
+
+#if os(macOS)
+extension NSUserScriptTask {
+
+    static func makeVolumeCreationTask(at tempDir: URL, volumeName: String) throws -> NSUserScriptTask {
+        let scriptURL = tempDir.appendingPathComponent("createVol.sh", isDirectory: false)
+        let dmgURL = tempDir.appendingPathComponent(volumeName).appendingPathExtension("dmg")
+        let script = """
+        #!/bin/bash
+        hdiutil create -size 5m -fs HFS+ -type SPARSEBUNDLE -ov -volname "\(volumeName)" "\(dmgURL.path)"
+        hdiutil attach -nobrowse "\(dmgURL.appendingPathExtension("sparsebundle").path)"
+        """
+        try script.write(to: scriptURL, atomically: false, encoding: .utf8)
+        let permissions = NSNumber(value: Int16(0o770))
+        try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: scriptURL.path)
+        return try NSUserScriptTask(url: scriptURL)
+    }
+}
+#endif

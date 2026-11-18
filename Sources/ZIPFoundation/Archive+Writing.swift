@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -121,15 +121,20 @@ extension Archive {
                          compressionMethod: CompressionMethod = .none, bufferSize: Int = defaultWriteChunkSize,
                          progress: Progress? = nil, provider: Provider) throws {
         guard self.accessMode != .read else { throw ArchiveError.unwritableArchive }
+        // The destination of a symlink is provided at once. Its actual size is recorded, so that the sizes
+        // of the entry match the stored data even if `uncompressedSize` is wrong.
+        let linkData = type == .symlink ? try Self.readLinkDestination(size: uncompressedSize, from: provider) : nil
+        let uncompressedSize = linkData.map { Int64($0.count) } ?? uncompressedSize
         // Directories and symlinks cannot be compressed
         let compressionMethod = type == .file ? compressionMethod : .none
         progress?.totalUnitCount = type == .directory ? defaultDirectoryUnitCount : uncompressedSize
         let (eocdRecord, zip64EOCD) = (self.endOfCentralDirectoryRecord, self.zip64EndOfCentralDirectory)
-        guard self.offsetToStartOfCentralDirectory <= .max else { throw ArchiveError.invalidCentralDirectoryOffset }
+        guard self.offsetToStartOfCentralDirectory <= Int64.max else {
+            throw ArchiveError.invalidCentralDirectoryOffset
+        }
         var startOfCD = Int64(self.offsetToStartOfCentralDirectory)
-        fseeko(self.archiveFile, zip_off_t(startOfCD), SEEK_SET)
         let existingSize = self.sizeOfCentralDirectory
-        let existingData = try Data.readChunk(of: Int(existingSize), from: self.archiveFile)
+        let existingData = try self.readCentralDirectoryData(at: startOfCD, size: existingSize)
         fseeko(self.archiveFile, zip_off_t(startOfCD), SEEK_SET)
         let fileHeaderStart = Int64(ftello(self.archiveFile))
         guard fileHeaderStart >= 0 else { throw ArchiveError.unwritableArchive }
@@ -144,7 +149,9 @@ extension Archive {
             // File Data
             let (written, checksum) = try self.writeEntry(uncompressedSize: uncompressedSize, type: type,
                                                           compressionMethod: compressionMethod, bufferSize: bufferSize,
-                                                          progress: progress, provider: provider)
+                                                          progress: progress) { position, size in
+                return try linkData ?? provider(position, size)
+            }
             startOfCD = Int64(ftello(self.archiveFile))
             guard startOfCD >= 0 else { throw ArchiveError.unwritableArchive }
 
@@ -189,11 +196,16 @@ extension Archive {
         defer { tempDir.map { try? FileManager().removeItem(at: $0) } }
         progress?.totalUnitCount = self.totalUnitCountForRemoving(entry)
         var centralDirectoryData = Data()
-        var offset: UInt64 = 0
-        for currentEntry in self {
+        for currentEntry in self where currentEntry != entry {
             let cds = currentEntry.centralDirectoryStructure
-            if currentEntry != entry {
+            do {
                 let entryStart = cds.effectiveRelativeOffsetOfLocalHeader
+                guard entryStart <= Int64.max else { throw ArchiveError.invalidLocalHeaderDataOffset }
+                // The remaining entries are written in the order of the central directory. That order can differ
+                // from the order in which they are stored in the receiver. The new offset of an entry is
+                // therefore the position it is written to and not its old offset minus the removed size.
+                let updatedOffset = Int64(ftello(tempArchive.archiveFile))
+                guard updatedOffset >= 0 else { throw ArchiveError.unwritableArchive }
                 fseeko(self.archiveFile, zip_off_t(entryStart), SEEK_SET)
                 let provider: Provider = { (_, chunkSize) -> Data in
                     return try Data.readChunk(of: chunkSize, from: self.archiveFile)
@@ -203,13 +215,13 @@ extension Archive {
                     _ = try Data.write(chunk: $0, to: tempArchive.archiveFile)
                     progress?.completedUnitCount += Int64($0.count)
                 }
-                guard currentEntry.localSize <= .max else { throw ArchiveError.invalidLocalHeaderSize }
+                guard currentEntry.localSize <= Int64.max else { throw ArchiveError.invalidLocalHeaderSize }
                 _ = try Data.consumePart(of: Int64(currentEntry.localSize), chunkSize: bufferSize,
                                          provider: provider, consumer: consumer)
-                let updatedCentralDirectory = updateOffsetInCentralDirectory(centralDirectoryStructure: cds,
-                                                                             updatedOffset: entryStart - offset)
+                let updatedCentralDirectory = try updateOffsetInCentralDirectory(centralDirectoryStructure: cds,
+                                                                                 updatedOffset: UInt64(updatedOffset))
                 centralDirectoryData.append(updatedCentralDirectory.data)
-            } else { offset = currentEntry.localSize }
+            }
         }
         let startOfCentralDirectory = Int64(ftello(tempArchive.archiveFile))
         guard startOfCentralDirectory >= 0 else { throw ArchiveError.unwritableArchive }
@@ -269,15 +281,37 @@ extension Archive {
 
 private extension Archive {
 
+    static func readLinkDestination(size: Int64, from provider: Provider) throws -> Data {
+        guard size >= 0, let count = Int(exactly: size) else { throw ArchiveError.invalidEntrySize }
+        return try provider(0, count)
+    }
+
+    /// Reads the central directory of the receiver.
+    ///
+    /// The offset and the size of the central directory can't be trusted. A central directory that is not
+    /// located within the receiver is rejected. Otherwise, a claimed size could allocate an arbitrary amount
+    /// of memory and grow the receiver by that size when the central directory is written again.
+    func readCentralDirectoryData(at offset: Int64, size: UInt64) throws -> Data {
+        fseeko(self.archiveFile, 0, SEEK_END)
+        let archiveLength = Int64(ftello(self.archiveFile))
+        guard archiveLength >= offset, size <= UInt64(archiveLength - offset) else {
+            throw ArchiveError.invalidCentralDirectorySize
+        }
+        fseeko(self.archiveFile, zip_off_t(offset), SEEK_SET)
+        let data = try Data.readChunk(of: Int(size), from: self.archiveFile)
+        guard data.count == Int(size) else { throw ArchiveError.invalidCentralDirectorySize }
+
+        return data
+    }
+
     func updateOffsetInCentralDirectory(centralDirectoryStructure: CentralDirectoryStructure,
-                                        updatedOffset: UInt64) -> CentralDirectoryStructure {
-        let zip64ExtendedInformation = Entry.ZIP64ExtendedInformation(
-            zip64ExtendedInformation: centralDirectoryStructure.zip64ExtendedInformation, offset: updatedOffset,
-            maxOffsetOfLocalFileHeader: self.maxOffsetOfLocalFileHeader)
-        let offsetInCD = updatedOffset < maxOffsetOfLocalFileHeader ? UInt32(updatedOffset) : UInt32.max
-        return CentralDirectoryStructure(centralDirectoryStructure: centralDirectoryStructure,
-                                         zip64ExtendedInformation: zip64ExtendedInformation,
-                                         relativeOffset: offsetInCD)
+                                        updatedOffset: UInt64) throws -> CentralDirectoryStructure {
+        let updatedStructure = CentralDirectoryStructure(centralDirectoryStructure: centralDirectoryStructure,
+                                                         updatedOffset: updatedOffset,
+                                                         maxOffsetOfLocalFileHeader: self.maxOffsetOfLocalFileHeader)
+        // The updated extra fields don't fit into the central directory structure.
+        guard let updatedStructure = updatedStructure else { throw ArchiveError.invalidCentralDirectorySize }
+        return updatedStructure
     }
 
     func rollback(_ localFileHeaderStart: UInt64, _ existingCentralDirectory: (data: Data, size: UInt64),

@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -62,10 +62,11 @@ extension FileManager {
             if shouldKeepParent { subPaths.append("") }
             var totalUnitCount = Int64(0)
             if let progress = progress {
-                totalUnitCount = subPaths.reduce(Int64(0), {
-                    let itemURL = sourceURL.appendingPathComponent($1)
-                    let itemSize = archive.totalUnitCountForAddingItem(at: itemURL)
-                    return $0 + itemSize
+                totalUnitCount = subPaths.reduce(Int64(0), { (count, subPath) in
+                    return autoreleasepool {
+                        let itemURL = sourceURL.appendingPathComponent(subPath)
+                        return count + archive.totalUnitCountForAddingItem(at: itemURL)
+                    }
                 })
                 progress.totalUnitCount = totalUnitCount
             }
@@ -74,17 +75,20 @@ extension FileManager {
             // as common base for all entries (similar to macOS' Archive Utility.app)
             let directoryPrefix = sourceURL.lastPathComponent
             for entryPath in subPaths {
-                let finalEntryPath = shouldKeepParent ? directoryPrefix + "/" + entryPath : entryPath
-                let finalBaseURL = shouldKeepParent ? sourceURL.deletingLastPathComponent() : sourceURL
-                if let progress = progress {
-                    let itemURL = sourceURL.appendingPathComponent(entryPath)
-                    let entryProgress = archive.makeProgressForAddingItem(at: itemURL)
-                    progress.addChild(entryProgress, withPendingUnitCount: entryProgress.totalUnitCount)
-                    try archive.addEntry(with: finalEntryPath, relativeTo: finalBaseURL,
-                                         compressionMethod: compressionMethod, progress: entryProgress)
-                } else {
-                    try archive.addEntry(with: finalEntryPath, relativeTo: finalBaseURL,
-                                         compressionMethod: compressionMethod)
+                // Release temporary Foundation objects before adding the next entry.
+                try autoreleasepool {
+                    let finalEntryPath = shouldKeepParent ? directoryPrefix + "/" + entryPath : entryPath
+                    let finalBaseURL = shouldKeepParent ? sourceURL.deletingLastPathComponent() : sourceURL
+                    if let progress = progress {
+                        let itemURL = sourceURL.appendingPathComponent(entryPath)
+                        let entryProgress = archive.makeProgressForAddingItem(at: itemURL)
+                        progress.addChild(entryProgress, withPendingUnitCount: entryProgress.totalUnitCount)
+                        try archive.addEntry(with: finalEntryPath, relativeTo: finalBaseURL,
+                                             compressionMethod: compressionMethod, progress: entryProgress)
+                    } else {
+                        try archive.addEntry(with: finalEntryPath, relativeTo: finalBaseURL,
+                                             compressionMethod: compressionMethod)
+                    }
                 }
             }
         } else {
@@ -114,45 +118,45 @@ extension FileManager {
             throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: sourceURL.path])
         }
         let archive = try Archive(url: sourceURL, accessMode: .read, pathEncoding: pathEncoding)
-        var totalUnitCount = Int64(0)
         let symlinksValidWithin = symlinksValidWithin ?? destinationURL
         if let progress = progress {
-            totalUnitCount = archive.reduce(0, { $0 + archive.totalUnitCountForReading($1) })
-            progress.totalUnitCount = totalUnitCount
+            progress.totalUnitCount = archive.reduce(0, {
+                let (count, didOverflow) = $0.addingReportingOverflow(archive.totalUnitCountForReading($1))
+                return didOverflow ? .max : count
+            })
         }
-
-        for entry in archive {
+        let destinationComponents = URL.resolvedPathComponents(ofPath: destinationURL.path,
+                                                               missingComponentsAreDirectories: true)
+        func extractEntry(_ entry: Entry) throws {
             let path = pathEncoding == nil ? entry.path : entry.path(using: pathEncoding!)
             let entryURL = destinationURL.appendingPathComponent(path)
-            guard entryURL.isContained(in: destinationURL) else {
-                throw CocoaError(.fileReadInvalidFileName,
-                                 userInfo: [NSFilePathErrorKey: entryURL.path])
+            // A path without a name (e.g. an empty path) would refer to the destination directory itself.
+            guard let destinationComponents = destinationComponents, path.contains(where: { $0 != "/" }),
+                  entryURL.isContained(in: destinationURL, resolvedTo: destinationComponents) else {
+                throw CocoaError(.fileReadInvalidFileName, userInfo: [NSFilePathErrorKey: entryURL.path])
             }
             let crc32: CRC32
             if let progress = progress {
                 let entryProgress = archive.makeProgressForReading(entry)
                 progress.addChild(entryProgress, withPendingUnitCount: entryProgress.totalUnitCount)
-                crc32 = try archive.extract(entry, to: entryURL,
-                                            skipCRC32: skipCRC32,
-                                            symlinksValidWithin: symlinksValidWithin,
-                                            progress: entryProgress)
+                crc32 = try archive.extract(entry, to: entryURL, skipCRC32: skipCRC32,
+                                            symlinksValidWithin: symlinksValidWithin, progress: entryProgress)
             } else {
-                crc32 = try archive.extract(entry, to: entryURL,
-                                            skipCRC32: skipCRC32,
+                crc32 = try archive.extract(entry, to: entryURL, skipCRC32: skipCRC32,
                                             symlinksValidWithin: symlinksValidWithin)
             }
-
-            func verifyChecksumIfNecessary() throws {
-                if skipCRC32 == false, crc32 != entry.checksum {
-                    // `extract` has already written the (corrupt or tampered) contents to disk. Remove
-                    // them so a failed integrity check never leaves a partial/malicious file behind.
-                    // Note: CRC32 detects accidental corruption; it is not an authenticity guarantee,
-                    // since the expected checksum comes from the same untrusted archive.
-                    try? fileManager.removeItem(at: entryURL)
-                    throw Archive.ArchiveError.invalidCRC32
-                }
+            if skipCRC32 == false, crc32 != entry.checksum {
+                // `extract` has already written the (corrupt or tampered) contents to disk. Remove
+                // them so a failed integrity check never leaves a partial/malicious file behind.
+                // Note: CRC32 detects accidental corruption; it is not an authenticity guarantee,
+                // since the expected checksum comes from the same untrusted archive.
+                try? fileManager.removeItem(at: entryURL)
+                throw Archive.ArchiveError.invalidCRC32
             }
-            try verifyChecksumIfNecessary()
+        }
+        for entry in archive {
+            // Release temporary Foundation objects before extracting the next entry.
+            try autoreleasepool { try extractEntry(entry) }
         }
     }
 
@@ -165,6 +169,8 @@ extension FileManager {
         // would throw a `.fileReadNoSuchFile` false positive error.
         // For ZIP files it may be intended to archive "broken" symlinks because they might be
         // resolvable again when extracting the archive to a different destination.
+        // This only holds on Darwin platforms. On Linux, `URL.checkResourceIsReachable()` traverses symlinks too.
+        // Broken symlinks are therefore reported as non-existent there.
         return (try? url.checkResourceIsReachable()) == true
     }
 
@@ -214,12 +220,13 @@ extension FileManager {
         // since 2.6. swift-corelibs-foundation's `setAttributes` doesn't
         // round-trip `.modificationDate` for symlinks today, so we go
         // straight to the libc syscall here to preserve mtime parity with
-        // Apple platforms when extracting.
+        // Apple platforms when extracting. Not all file systems support this,
+        // so a failure to set the date does not fail the extraction.
         guard let modificationDate = attributes[.modificationDate] as? Date else {
             throw Entry.EntryError.missingModificationDateAttributeError
         }
 
-        try self.setSymlinkModificationDate(modificationDate, ofItemAtURL: url)
+        try? self.setSymlinkModificationDate(modificationDate, ofItemAtURL: url)
 #else
         // Some platforms lack a fully equivalent symlink-targeted
         // `lutimes`; leave this codepath as a no-op there.

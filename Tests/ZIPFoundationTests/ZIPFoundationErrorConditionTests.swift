@@ -5,12 +5,21 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 import XCTest
 @testable import ZIPFoundation
 
 extension ZIPFoundationTests {
+
+    func testAddSymlinkWithInvalidSize() throws {
+        let archive = self.archive(for: #function, mode: .create)
+        XCTAssertSwiftError(try archive.addEntry(with: "link", type: .symlink, uncompressedSize: Int64(-1)) { _, _ in
+            XCTFail("Unexpected provider call for an invalid size")
+            return Data()
+        }, throws: Archive.ArchiveError.invalidEntrySize)
+        XCTAssertNil(archive["link"])
+    }
 
     func testArchiveReadErrorConditions() {
         let nonExistantURL = URL(fileURLWithPath: "/nothing")

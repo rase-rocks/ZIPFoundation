@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -62,15 +62,10 @@ extension Entry.LocalFileHeader {
         subRangeStart += Int(self.fileNameLength)
         subRangeEnd = subRangeStart + Int(self.extraFieldLength)
         self.extraFieldData = additionalData.subdata(in: subRangeStart..<subRangeEnd)
-        var extraFields: [ExtensibleDataField] = []
         if let zip64ExtendedInformation = Entry.ZIP64ExtendedInformation.scanForZIP64Field(in: self.extraFieldData,
                                                                                            fields: self.validFields) {
-            extraFields.append(zip64ExtendedInformation)
+            self.extraFields = [zip64ExtendedInformation]
         }
-        if let infoZIPUnicodePath = Entry.InfoZIPUnicodePath.scanForUnicodePath(in: self.extraFieldData) {
-            extraFields.append(infoZIPUnicodePath)
-        }
-        self.extraFields = extraFields
     }
 }
 
@@ -172,5 +167,11 @@ extension Entry.DataDescriptor {
         // Data descriptors of already existing entries are manually preserved
         // when copying those entries to the tempArchive during remove(_ entry:).
         self.data = Data()
+    }
+
+    /// Checks if the sizes of the receiver are the sizes that the central directory states for its entry.
+    func matchesSizes(of centralDirectoryStructure: Entry.CentralDirectoryStructure) -> Bool {
+        return UInt64(self.compressedSize) == centralDirectoryStructure.effectiveCompressedSize
+            && UInt64(self.uncompressedSize) == centralDirectoryStructure.effectiveUncompressedSize
     }
 }

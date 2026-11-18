@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -108,6 +108,12 @@ extension ZIPFoundationTests {
             XCTFail("Failed to remove entry from memory archive with error : \(error)")
         }
         XCTAssert(archive.checkIntegrity())
+    }
+
+    func testMemoryArchiveWithInvalidLocalHeaderOffset() {
+        // The local header offset of the entry points behind the end of the backing data.
+        let archive = self.memoryArchive(for: #function, mode: .read)
+        XCTAssertTrue(Array(archive).isEmpty)
     }
 
     func testMemoryArchiveErrorConditions() throws {

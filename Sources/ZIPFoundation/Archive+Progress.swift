@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -17,7 +17,8 @@ extension Archive {
     /// - Parameter entry: The entry that will be removed.
     /// - Returns: The number of the work units.
     public func totalUnitCountForRemoving(_ entry: Entry) -> Int64 {
-        return Int64(self.offsetToStartOfCentralDirectory - entry.localSize)
+        let (offsetToStartOfCD, localSize) = (self.offsetToStartOfCentralDirectory, entry.localSize)
+        return localSize <= offsetToStartOfCD ? Int64(clamping: offsetToStartOfCD - localSize) : 0
     }
 
     func makeProgressForRemoving(_ entry: Entry) -> Progress {
@@ -31,8 +32,11 @@ extension Archive {
     /// - Returns: The number of the work units.
     public func totalUnitCountForReading(_ entry: Entry) -> Int64 {
         switch entry.type {
+        case .symlink where entry.isCompressed == false:
+            // Stored symlinks are read by their compressed size.
+            return Int64(clamping: entry.centralDirectoryStructure.effectiveCompressedSize)
         case .file, .symlink:
-            return Int64(entry.uncompressedSize)
+            return Int64(clamping: entry.uncompressedSize)
         case .directory:
             return defaultDirectoryUnitCount
         }

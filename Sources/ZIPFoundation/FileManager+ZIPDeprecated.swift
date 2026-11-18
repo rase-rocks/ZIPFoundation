@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -28,5 +28,16 @@ public extension FileManager {
         try self.unzipItem(at: sourceURL, to: destinationURL, skipCRC32: skipCRC32,
                            symlinksValidWithin: symlinksValidWithin,
                            progress: progress, pathEncoding: pathEncoding)
+    }
+}
+
+public extension URL {
+
+    @available(*, deprecated, message: "Containment is checked during extraction. This method will be removed.")
+    func isContained(in parentDirectoryURL: URL) -> Bool {
+        guard let directoryComponents = URL.resolvedPathComponents(ofPath: parentDirectoryURL.path) else {
+            return false
+        }
+        return self.isContained(in: parentDirectoryURL, resolvedTo: directoryComponents)
     }
 }

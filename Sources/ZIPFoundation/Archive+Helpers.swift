@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -17,7 +17,13 @@ extension Archive {
     func readUncompressed(entry: Entry, bufferSize: Int, skipCRC32: Bool,
                           progress: Progress? = nil, with consumer: Consumer) throws -> CRC32 {
         let size = entry.centralDirectoryStructure.effectiveUncompressedSize
-        guard size <= .max else { throw ArchiveError.invalidEntrySize }
+        return try self.readUncompressed(size: size, bufferSize: bufferSize, skipCRC32: skipCRC32,
+                                         progress: progress, with: consumer)
+    }
+
+    func readUncompressed(size: UInt64, bufferSize: Int, skipCRC32: Bool,
+                          progress: Progress? = nil, with consumer: Consumer) throws -> CRC32 {
+        guard size <= Int64.max else { throw ArchiveError.invalidEntrySize }
         return try Data.consumePart(of: Int64(size), chunkSize: bufferSize, skipCRC32: skipCRC32,
                                     provider: { (_, chunkSize) -> Data in
                                         return try Data.readChunk(of: chunkSize, from: self.archiveFile)
@@ -31,7 +37,7 @@ extension Archive {
     func readCompressed(entry: Entry, bufferSize: Int, skipCRC32: Bool,
                         progress: Progress? = nil, with consumer: Consumer) throws -> CRC32 {
         let size = entry.centralDirectoryStructure.effectiveCompressedSize
-        guard size <= .max else { throw ArchiveError.invalidEntrySize }
+        guard size <= Int64.max else { throw ArchiveError.invalidEntrySize }
         // Bound the inflated output to the size the entry declares. Without this, a "zip bomb"
         // (a small deflate stream that inflates to many gigabytes) would stream unbounded output
         // to the consumer/disk. On the CZLib path the decoder also otherwise keeps pulling input
@@ -61,16 +67,12 @@ extension Archive {
         }
         switch compressionMethod {
         case .none:
-            let localFileHeader = entry.localFileHeader
-            let size = Int(localFileHeader.compressedSize)
-            // A symbolic link target is a filesystem path, so it can never legitimately exceed
-            // `PATH_MAX`. Reject oversized declarations before allocating, so a crafted entry
-            // cannot force a huge single up-front allocation (memory-pressure DoS).
-            guard size <= maxSymlinkTargetLength else { throw ArchiveError.invalidEntrySize }
-            let data = try Data.readChunk(of: size, from: self.archiveFile)
-            checksum = data.crc32(checksum: 0)
-            try consumer(data)
-            progress?.completedUnitCount = self.totalUnitCountForReading(entry)
+            // The sizes of the local file header can't be trusted. Reading in chunks bounds the allocation
+            // by the buffer size. Some writers stored a wrong uncompressed size for symlinks,
+            // so the compressed size determines the length of the destination.
+            let size = entry.centralDirectoryStructure.effectiveCompressedSize
+            checksum = try self.readUncompressed(size: size, bufferSize: bufferSize, skipCRC32: skipCRC32,
+                                                 progress: progress, with: consumer)
         case .deflate: checksum = try self.readCompressed(entry: entry, bufferSize: bufferSize,
                                                           skipCRC32: skipCRC32, progress: progress, with: consumer)
         }
@@ -178,7 +180,7 @@ extension Archive {
                                                                       compressedSize: extraCompressedSize ?? 0,
                                                                       relativeOffsetOfLocalHeader: extraOffset ?? 0,
                                                                       diskNumberStart: 0)
-            extraFieldLength += Entry.ZIP64ExtendedInformation.headerSize
+            extraFieldLength += UInt16(ExtraField.headerSize)
         }
         let centralDirectory = CentralDirectoryStructure(localFileHeader: localFileHeader,
                                                          fileAttributes: externalFileAttributes,
@@ -212,12 +214,19 @@ extension Archive {
                 }
                 return (sizeOfCD + UInt64(cdDataLengthChange), numberOfTotalEntries + UInt64(countChange))
             case .remove:
-                return (sizeOfCD - UInt64(-cdDataLengthChange), numberOfTotalEntries - UInt64(-countChange))
+                guard sizeOfCD >= -cdDataLengthChange, startOfEndOfCentralDirectory >= startOfCentralDirectory else {
+                    throw ArchiveError.invalidCentralDirectorySize
+                }
+                guard numberOfTotalEntries >= -countChange else {
+                    throw ArchiveError.invalidCentralDirectoryEntryCount
+                }
+                // The central directory structures of the remaining entries can change their size when their
+                // ZIP64 extended information is updated. The size of the written central directory has to be used.
+                return (startOfEndOfCentralDirectory - startOfCentralDirectory,
+                        numberOfTotalEntries - UInt64(-countChange))
             }
         }()
-        let sizeOfCDForEOCD = updatedSizeOfCD >= maxSizeOfCentralDirectory
-            ? UInt32.max
-            : UInt32(updatedSizeOfCD)
+        let sizeOfCDForEOCD = updatedSizeOfCD >= maxSizeOfCentralDirectory ? UInt32.max : UInt32(updatedSizeOfCD)
         let numberOfTotalEntriesForEOCD = updatedNumberOfEntries >= maxTotalNumberOfEntries
             ? UInt16.max
             : UInt16(updatedNumberOfEntries)
@@ -310,5 +319,84 @@ extension Archive {
         zip64EOCD = ZIP64EndOfCentralDirectory(record: updatedRecord, locator: updatedLocator)
         _ = try Data.write(chunk: zip64EOCD.data, to: self.archiveFile)
         return zip64EOCD
+    }
+}
+
+extension Archive {
+
+    // MARK: - End of Central Directory
+
+    static func scanForEndOfCentralDirectoryRecord(in file: FILEPointer)
+    -> EndOfCentralDirectoryStructure? {
+        var eocdOffset: UInt64 = 0
+        var index = minEndOfCentralDirectoryOffset
+        fseeko(file, 0, SEEK_END)
+        let archiveLength = Int64(ftello(file))
+        guard archiveLength >= 0 else { return nil }
+
+        while eocdOffset == 0 && index < maxDirectoryEndOffset && index <= archiveLength {
+            fseeko(file, zip_off_t(archiveLength - index), SEEK_SET)
+            var potentialDirectoryEndTag: UInt32 = UInt32()
+            fread(&potentialDirectoryEndTag, 1, MemoryLayout<UInt32>.size, file)
+            if potentialDirectoryEndTag == UInt32(endOfCentralDirectoryStructSignature) {
+                eocdOffset = UInt64(archiveLength - index)
+                return self.endOfCentralDirectoryStructure(in: file, at: eocdOffset)
+            }
+            index += 1
+        }
+        // A record that is followed by more data than a ZIP file comment can hold is not within reach of
+        // the scan above. The remaining part of the file is searched in chunks.
+        guard let offset = self.scanForEndOfCentralDirectorySignature(in: file,
+                                                                      before: archiveLength - index + 1) else {
+            return nil
+        }
+        return self.endOfCentralDirectoryStructure(in: file, at: offset)
+    }
+
+    static func endOfCentralDirectoryStructure(in file: FILEPointer, at eocdOffset: UInt64)
+    -> EndOfCentralDirectoryStructure? {
+        guard let eocd: EndOfCentralDirectoryRecord = Data.readStruct(from: file, at: eocdOffset) else {
+            return nil
+        }
+        let zip64EOCD = scanForZIP64EndOfCentralDirectory(in: file, eocdOffset: eocdOffset)
+        return (eocd, zip64EOCD)
+    }
+
+    /// Searches for the last end of central directory signature that starts before `endOffset`.
+    static func scanForEndOfCentralDirectorySignature(in file: FILEPointer, before endOffset: Int64)
+    -> UInt64? {
+        var signature = UInt32(endOfCentralDirectoryStructSignature).littleEndian
+        let signatureData = Data(bytes: &signature, count: MemoryLayout<UInt32>.size)
+        let chunkSize = Int64(defaultReadChunkSize)
+        // A signature that starts before `end` can extend past it.
+        var end = endOffset + Int64(signatureData.count - 1)
+        while end >= Int64(signatureData.count) {
+            let start = Swift.max(0, end - chunkSize)
+            fseeko(file, zip_off_t(start), SEEK_SET)
+            guard let chunk = try? Data.readChunk(of: Int(end - start), from: file),
+                  chunk.count == Int(end - start) else { return nil }
+            if let range = chunk.range(of: signatureData, options: .backwards) {
+                return UInt64(start) + UInt64(range.lowerBound - chunk.startIndex)
+            }
+            guard start > 0 else { return nil }
+            // Consecutive chunks overlap, so that a signature at a chunk boundary is found.
+            end = start + Int64(signatureData.count - 1)
+        }
+        return nil
+    }
+
+    static func scanForZIP64EndOfCentralDirectory(in file: FILEPointer, eocdOffset: UInt64)
+    -> ZIP64EndOfCentralDirectory? {
+        guard UInt64(ZIP64EndOfCentralDirectoryLocator.size) < eocdOffset else { return nil }
+
+        let locatorOffset = eocdOffset - UInt64(ZIP64EndOfCentralDirectoryLocator.size)
+        guard UInt64(ZIP64EndOfCentralDirectoryRecord.size) < locatorOffset else { return nil }
+
+        let recordOffset = locatorOffset - UInt64(ZIP64EndOfCentralDirectoryRecord.size)
+        guard let locator: ZIP64EndOfCentralDirectoryLocator = Data.readStruct(from: file, at: locatorOffset),
+              let record: ZIP64EndOfCentralDirectoryRecord = Data.readStruct(from: file, at: recordOffset) else {
+            return nil
+        }
+        return ZIP64EndOfCentralDirectory(record: record, locator: locator)
     }
 }

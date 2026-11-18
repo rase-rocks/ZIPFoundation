@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -82,6 +82,8 @@ extension Data {
             let remainingSize = size - bytesRead
             chunkSize = remainingSize < chunkSize ? Int(remainingSize) : chunkSize
             let data = try provider(bytesRead, chunkSize)
+            // `size` can't be trusted. Stop when the provider runs dry before `size` is reached.
+            guard data.isEmpty == false else { throw DataError.unreadableFile }
             try consumer(data)
             if !skipCRC32 {
                 checksum = data.crc32(checksum: checksum)

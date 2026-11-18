@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -60,20 +60,20 @@ extension Archive {
             guard fileManager.itemExists(at: url) == false else {
                 throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: url.path])
             }
-            let consumer = { (data: Data) in
-                guard let linkPath = String(data: data, encoding: .utf8) else { throw ArchiveError.invalidEntryPath }
+            let linkPath: String
+            (linkPath, checksum) = try self.readSymbolicLinkDestination(of: entry, bufferSize: bufferSize,
+                                                                        skipCRC32: skipCRC32, progress: progress,
+                                                                        maximumSize: maximumSize)
 
-                let parentURL = url.deletingLastPathComponent()
-                let isAbsolutePath = (linkPath as NSString).isAbsolutePath
-                let linkURL = URL(fileURLWithPath: linkPath, relativeTo: isAbsolutePath ? nil : parentURL)
-                let isContained = linkURL.isContained(in: symlinksValidWithin ?? parentURL)
-                guard isContained else { throw ArchiveError.uncontainedSymlink }
+            // The link destination has to be resolved through the file system to account for
+            // symlinks created by preceding entries. (e.g. `a -> .` followed by `b -> a/..`)
+            let parentURL = url.deletingLastPathComponent()
+            let isContained = URL.isSymlinkDestination(linkPath, ofSymlinkIn: parentURL,
+                                                       containedIn: symlinksValidWithin ?? parentURL)
+            guard isContained else { throw ArchiveError.uncontainedSymlink }
 
-                try fileManager.createParentDirectoryStructure(for: url)
-                try fileManager.createSymbolicLink(atPath: url.path, withDestinationPath: linkPath)
-            }
-            checksum = try self.extract(entry, bufferSize: bufferSize, skipCRC32: skipCRC32,
-                                        progress: progress, maximumSize: maximumSize, consumer: consumer)
+            try fileManager.createParentDirectoryStructure(for: url)
+            try fileManager.createSymbolicLink(atPath: url.path, withDestinationPath: linkPath)
         }
         try fileManager.transferAttributes(from: entry, toItemAtURL: url)
         return checksum
@@ -99,11 +99,8 @@ extension Archive {
         // inflating to an unbounded amount of data. `maximumSize` defaults to `.max`, preserving the
         // previous unbounded behavior. Reject early on the declared size, then enforce the running
         // total in case the declared size understates the actual output.
-        let limit = maximumSize < 0 ? 0 : UInt64(maximumSize)
-        if entry.uncompressedSize > limit {
-            throw ArchiveError.entryExceedsMaximumSize(size: entry.uncompressedSize, limit: limit)
-        }
-        guard entry.dataOffset <= .max else { throw ArchiveError.invalidLocalHeaderDataOffset }
+        let limit = try self.validatedLimit(for: entry, maximumSize: maximumSize)
+        guard entry.dataOffset <= Int64.max else { throw ArchiveError.invalidLocalHeaderDataOffset }
         // `withoutActuallyEscaping` lets the byte-counting wrapper close over the non-escaping
         // `consumer` for the duration of extraction without changing the public signature.
         return try withoutActuallyEscaping(consumer) { escapingConsumer -> CRC32 in
@@ -141,5 +138,43 @@ extension Archive {
             }
             return checksum
         }
+    }
+}
+
+extension Archive {
+
+    /// Returns `maximumSize` as a byte limit, clamping negative values to 0, after checking the size `entry`
+    /// declares against it.
+    func validatedLimit(for entry: Entry, maximumSize: Int) throws -> UInt64 {
+        let limit = maximumSize < 0 ? 0 : UInt64(maximumSize)
+        // A declared size beyond `Int64.max` is invalid rather than over the cap: no entry can be read that far.
+        guard entry.uncompressedSize <= Int64.max else { throw ArchiveError.invalidEntrySize }
+        if entry.uncompressedSize > limit {
+            throw ArchiveError.entryExceedsMaximumSize(size: entry.uncompressedSize, limit: limit)
+        }
+        return limit
+    }
+
+    func readSymbolicLinkDestination(of entry: Entry, bufferSize: Int, skipCRC32: Bool,
+                                     progress: Progress? = nil, maximumSize: Int = .max) throws -> (String, CRC32) {
+        // The sizes of the entry can't be trusted. Collecting the destination stops at the size limit,
+        // so that a small compressed entry can't allocate an arbitrary amount of memory.
+        let size = entry.isCompressed ? entry.uncompressedSize : entry.centralDirectoryStructure.effectiveCompressedSize
+        guard size <= maxSymbolicLinkDestinationSize else { throw ArchiveError.invalidEntryPath }
+
+        // The link destination of compressed symlinks can be delivered in multiple chunks.
+        var linkData = Data()
+        let checksum = try self.extract(entry, bufferSize: bufferSize, skipCRC32: skipCRC32, progress: progress,
+                                        maximumSize: maximumSize, consumer: { (data) in
+            guard linkData.count + data.count <= maxSymbolicLinkDestinationSize else {
+                throw ArchiveError.invalidEntryPath
+            }
+            linkData.append(data)
+        })
+        guard let linkPath = String(data: linkData, encoding: .utf8) else { throw ArchiveError.invalidEntryPath }
+        // A destination with a NUL byte can't be represented as a file system path.
+        guard linkPath.utf8.contains(0) == false else { throw ArchiveError.invalidEntryPath }
+
+        return (linkPath, checksum)
     }
 }

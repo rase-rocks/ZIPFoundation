@@ -5,10 +5,13 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
+#if canImport(Android)
+import Android
+#endif
 @testable import ZIPFoundation
 
 enum AdditionalDataError: Error {
@@ -25,11 +28,8 @@ class ZIPFoundationTests: XCTestCase {
         let processInfo = ProcessInfo.processInfo
         var tempZipDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
         tempZipDirectory.appendPathComponent("ZipTempDirectory")
-        // We use a unique path to support parallel test runs via
-        // "swift test --parallel"
-        // When using --parallel, setUp() and tearDown() are called 
-        // multiple times.
-        tempZipDirectory.appendPathComponent(processInfo.globallyUniqueString)
+        // Parallel test processes each run setUp() and tearDown() and need their own directory.
+        tempZipDirectory.appendPathComponent(ProcessInfo.processInfo.globallyUniqueString)
         return tempZipDirectory
     }()
 
@@ -190,12 +190,19 @@ extension ZIPFoundationTests {
             ("testArchiveAddEntryErrorConditions", testArchiveAddEntryErrorConditions),
             ("testArchiveCreateErrorConditions", testArchiveCreateErrorConditions),
             ("testArchiveInvalidEOCDRecordConditions", testArchiveInvalidEOCDRecordConditions),
+            ("testArchiveWithTrailingData", testArchiveWithTrailingData),
+            ("testRemoveEntryBeforeStoredSymlinkWithWrongSize", testRemoveEntryBeforeStoredSymlinkWithWrongSize),
+            ("testRemoveEntryBeforeStoredSymlinkWithDataDescriptor",
+             testRemoveEntryBeforeStoredSymlinkWithDataDescriptor),
             ("testArchiveInvalidDataErrorConditions", testArchiveInvalidDataErrorConditions),
             ("testArchiveIteratorErrorConditions", testArchiveIteratorErrorConditions),
             ("testArchiveReadErrorConditions", testArchiveReadErrorConditions),
             ("testArchiveUpdateErrorConditions", testArchiveUpdateErrorConditions),
             ("testCorruptFileErrorConditions", testCorruptFileErrorConditions),
             ("testCorruptSymbolicLinkErrorConditions", testCorruptSymbolicLinkErrorConditions),
+            ("testDecodeThrowsWhenProviderSignalsEOFBeforeStreamEnd",
+             testDecodeThrowsWhenProviderSignalsEOFBeforeStreamEnd),
+            ("testDecodeChunksSmallerThanBufferSize", testDecodeChunksSmallerThanBufferSize),
             ("testCreateArchiveAddCompressedEntry", testCreateArchiveAddCompressedEntry),
             ("testCRC32Calculation", testCRC32Calculation),
             ("testCreateArchiveAddDirectory", testCreateArchiveAddDirectory),
@@ -250,15 +257,43 @@ extension ZIPFoundationTests {
             ("testSimpleTraversalAttack", testSimpleTraversalAttack),
             ("testPathDelimiterTraversalAttack", testPathDelimiterTraversalAttack),
             ("testUnzipItem", testUnzipItem),
+            ("testUnzipItemToRelativeDestination", testUnzipItemToRelativeDestination),
             ("testUnzipItemWithPreferredEncoding", testUnzipItemWithPreferredEncoding),
             ("testUnzipItemErrorConditions", testUnzipItemErrorConditions),
             ("testUnzipUncontainedSymlink", testUnzipUncontainedSymlink),
+            ("testUnzipChainedSymlinkTraversal", testUnzipChainedSymlinkTraversal),
+            ("testUnzipDeferredSymlinkTraversal", testUnzipDeferredSymlinkTraversal),
+            ("testUnzipEntryPathTraversalThroughSymlink", testUnzipEntryPathTraversalThroughSymlink),
+            ("testUnzipEntryThroughUncontainedSymlink", testUnzipEntryThroughUncontainedSymlink),
+            ("testUnzipEntryThroughContainedSymlink", testUnzipEntryThroughContainedSymlink),
+            ("testUnzipSymlinkToNotYetExistingSymlink", testUnzipSymlinkToNotYetExistingSymlink),
+            ("testSymlinkContainmentWithUnresolvablePaths", testSymlinkContainmentWithUnresolvablePaths),
+            ("testUnzipIntoSymlinkLoop", testUnzipIntoSymlinkLoop),
+            ("testContainmentOfAbsolutePaths", testContainmentOfAbsolutePaths),
+            ("testUnzipEntryWithParentReference", testUnzipEntryWithParentReference),
+            ("testUnzipEntryWithLeadingCombiningMark", testUnzipEntryWithLeadingCombiningMark),
+            ("testUnzipEntryIntoCanonicallyEquivalentSibling", testUnzipEntryIntoCanonicallyEquivalentSibling),
+            ("testUnzipEntryWithoutName", testUnzipEntryWithoutName),
+            ("testUnzipSymlinkWithInvalidDestination", testUnzipSymlinkWithInvalidDestination),
             ("testZipItem", testZipItem),
             ("testLinuxTestSuiteIncludesAllTests", testLinuxTestSuiteIncludesAllTests),
             ("testFileModificationDate", testFileModificationDate),
             ("testFileModificationDateHelperMethods", testFileModificationDateHelperMethods),
             ("testInvalidSymlinkCompressionMethodErrorConditions", testInvalidSymlinkCompressionMethodErrorConditions),
-            ("testInfoZIPUnicodePathShortRecordIsRejected", testInfoZIPUnicodePathShortRecordIsRejected)
+            ("testReadStructureErrorConditions", testReadStructureErrorConditions),
+            ("testReadChunkErrorConditions", testReadChunkErrorConditions),
+            ("testWriteChunkErrorConditions", testWriteChunkErrorConditions),
+            ("testWriteLargeChunkErrorConditions", testWriteLargeChunkErrorConditions),
+            ("testUpdatedCentralDirectoryStructureKeepsOtherExtraFields",
+             testUpdatedCentralDirectoryStructureKeepsOtherExtraFields),
+            ("testUpdatedCentralDirectoryStructureKeepsVersionNeededToExtract",
+             testUpdatedCentralDirectoryStructureKeepsVersionNeededToExtract),
+            ("testUpdatedCentralDirectoryStructureRemovesUnneededZIP64Field",
+             testUpdatedCentralDirectoryStructureRemovesUnneededZIP64Field),
+            ("testUpdatedCentralDirectoryStructureWithZeroZIP64Values",
+             testUpdatedCentralDirectoryStructureWithZeroZIP64Values),
+            ("testUpdatedCentralDirectoryStructureWithExceedingExtraFieldLength",
+             testUpdatedCentralDirectoryStructureWithExceedingExtraFieldLength)
         ] + zip64Tests + darwinOnlyTests + posixOnlyTests + swift5OnlyTests + securityTests
     }
 
@@ -279,6 +314,8 @@ extension ZIPFoundationTests {
             ("testEntryInvalidZIP64ExtraFieldErrorConditions", testEntryInvalidZIP64ExtraFieldErrorConditions),
             ("testEntryScanForZIP64Field", testEntryScanForZIP64Field),
             ("testEntryScanForZIP64FieldErrorConditions", testEntryScanForZIP64FieldErrorConditions),
+            ("testEntryZIP64FieldContainingFields", testEntryZIP64FieldContainingFields),
+            ("testExtraFieldDataReplacingZIP64Field", testExtraFieldDataReplacingZIP64Field),
             ("testArchiveZIP64EOCDRecord", testArchiveZIP64EOCDRecord),
             ("testArchiveInvalidZIP64EOCERecordConditions", testArchiveInvalidZIP64EOCERecordConditions),
             ("testArchiveZIP64EOCDLocator", testArchiveZIP64EOCDLocator),
@@ -290,17 +327,36 @@ extension ZIPFoundationTests {
             ("testCreateZIP64ArchiveWithLargeSizeOfCD", testCreateZIP64ArchiveWithLargeSizeOfCD),
             ("testRemoveEntryFromArchiveWithZIP64EOCD", testRemoveEntryFromArchiveWithZIP64EOCD),
             ("testRemoveZIP64EntryFromArchiveWithZIP64EOCD", testRemoveZIP64EntryFromArchiveWithZIP64EOCD),
+            ("testRemoveEntryUpdatesSizeOfCentralDirectory", testRemoveEntryUpdatesSizeOfCentralDirectory),
             ("testRemoveEntryWithZIP64ExtendedInformation", testRemoveEntryWithZIP64ExtendedInformation),
+            ("testRemoveZIP64EntryPreservesExtraFields", testRemoveZIP64EntryPreservesExtraFields),
             ("testWriteEOCDWithTooLargeSizeOfCentralDirectory", testWriteEOCDWithTooLargeSizeOfCentralDirectory),
             ("testWriteEOCDWithTooLargeCentralDirectoryOffset", testWriteEOCDWithTooLargeCentralDirectoryOffset),
+            ("testWriteEOCDWithTooSmallCentralDirectory", testWriteEOCDWithTooSmallCentralDirectory),
+            ("testAddEntryWithInvalidZIP64CentralDirectory", testAddEntryWithInvalidZIP64CentralDirectory),
+            ("testIterateEntryWithOverflowingZIP64DataDescriptor", testIterateEntryWithOverflowingZIP64DataDescriptor),
+            ("testExtractEntryWithInvalidZIP64Size", testExtractEntryWithInvalidZIP64Size),
+            ("testExtractCompressedEntryWithInvalidZIP64Size", testExtractCompressedEntryWithInvalidZIP64Size),
+            ("testExtractEntryWithInvalidZIP64DataOffset", testExtractEntryWithInvalidZIP64DataOffset),
+            ("testUnzipItemWithInvalidZIP64SizeProgress", testUnzipItemWithInvalidZIP64SizeProgress),
+            ("testExtractEntryWithZIP64SizeExceedingArchive", testExtractEntryWithZIP64SizeExceedingArchive),
+            ("testRemoveEntryWithInvalidZIP64Size", testRemoveEntryWithInvalidZIP64Size),
+            ("testRemoveEntryWithReorderedCentralDirectory", testRemoveEntryWithReorderedCentralDirectory),
+            ("testRemoveEntryPreservesExtraFields", testRemoveEntryPreservesExtraFields),
             ("testWriteLargeChunk", testWriteLargeChunk),
             ("testExtractUncompressedZIP64Entries", testExtractUncompressedZIP64Entries),
             ("testExtractCompressedZIP64Entries", testExtractCompressedZIP64Entries),
             ("testExtractEntryWithZIP64DataDescriptor", testExtractEntryWithZIP64DataDescriptor),
+            ("testIterateZIP64EntryWithDefaultDataDescriptor", testIterateZIP64EntryWithDefaultDataDescriptor),
+            ("testRemoveEntryNextToDefaultDataDescriptor", testRemoveEntryNextToDefaultDataDescriptor),
             ("testUnzipSymlink", testUnzipSymlink),
+            ("testAddSymlinkWithInvalidSize", testAddSymlinkWithInvalidSize),
             ("testUnzipCompressedSymlink", testUnzipCompressedSymlink),
-            ("testEntryScanForInfoZIP", testEntryScanForInfoZIP),
-            ("testInfoZIPUnicodePath", testInfoZIPUnicodePath)
+            ("testExtractStoredSymlinkWithOversizedLocalHeader", testExtractStoredSymlinkWithOversizedLocalHeader),
+            ("testExtractStoredZIP64Symlink", testExtractStoredZIP64Symlink),
+            ("testExtractStoredSymlinkWithWrongUncompressedSize", testExtractStoredSymlinkWithWrongUncompressedSize),
+            ("testExtractCompressedSymlinkWithSmallBufferSize", testExtractCompressedSymlinkWithSmallBufferSize),
+            ("testDeprecatedContainmentCheck", testDeprecatedContainmentCheck)
         ]
     }
 
@@ -315,13 +371,7 @@ extension ZIPFoundationTests {
             ("testArchiveAddUncompressedEntryProgress", testArchiveAddUncompressedEntryProgress),
             ("testArchiveAddCompressedEntryProgress", testArchiveAddCompressedEntryProgress),
             ("testZIP64ArchiveAddEntryProgress", testZIP64ArchiveAddEntryProgress),
-            // The below test cases test error code paths but they lead to undefined behavior and memory
-            // corruption on non-Darwin platforms. We disable them for now.
-            ("testReadStructureErrorConditions", testReadStructureErrorConditions),
-            ("testReadChunkErrorConditions", testReadChunkErrorConditions),
-            ("testWriteChunkErrorConditions", testWriteChunkErrorConditions),
-            ("testWriteLargeChunkErrorConditions", testWriteLargeChunkErrorConditions),
-            // Fails for Swift < 4.2 on Linux. We can re-enable that when we drop Swift 4.x support
+            // Relies on Darwin file system behavior and on not running as root
             ("testZipItemErrorConditions", testZipItemErrorConditions),
             // Applying permissions on symlinks is only relevant on Darwin platforms
             ("testSymlinkPermissionsTransferErrorConditions", testSymlinkPermissionsTransferErrorConditions)
@@ -350,6 +400,7 @@ extension ZIPFoundationTests {
             ("testExtractCompressedFolderEntriesFromMemory", testExtractCompressedFolderEntriesFromMemory),
             ("testExtractUncompressedFolderEntriesFromMemory", testExtractUncompressedFolderEntriesFromMemory),
             ("testMemoryArchiveErrorConditions", testMemoryArchiveErrorConditions),
+            ("testMemoryArchiveWithInvalidLocalHeaderOffset", testMemoryArchiveWithInvalidLocalHeaderOffset),
             ("testWriteOnlyFile", testWriteOnlyFile),
             ("testReadOnlyFile", testReadOnlyFile),
             ("testReadOnlySlicedFile", testReadOnlySlicedFile),
@@ -367,47 +418,3 @@ extension ZIPFoundationTests {
         #endif
     }
 }
-
-extension Archive {
-    func checkIntegrity() -> Bool {
-        var isCorrect = false
-        do {
-            for entry in self {
-                let checksum = try self.extract(entry, consumer: { _ in })
-                isCorrect = checksum == entry.checksum
-                guard isCorrect else { break }
-            }
-        } catch { return false }
-        return isCorrect
-    }
-}
-
-extension Data {
-    static func makeRandomData(size: Int) -> Data {
-        #if os(macOS) || os(iOS) || os(watchOS) || os(tvOS) || os(visionOS)
-        let bytes = [UInt32](repeating: 0, count: size).map { _ in UInt32.random(in: 0...UInt32.max) }
-        #else
-        let bytes = [UInt32](repeating: 0, count: size).map { _ in random() }
-        #endif
-        return Data(bytes: bytes, count: size)
-    }
-}
-
-#if os(macOS)
-extension NSUserScriptTask {
-
-    static func makeVolumeCreationTask(at tempDir: URL, volumeName: String) throws -> NSUserScriptTask {
-        let scriptURL = tempDir.appendingPathComponent("createVol.sh", isDirectory: false)
-        let dmgURL = tempDir.appendingPathComponent(volumeName).appendingPathExtension("dmg")
-        let script = """
-        #!/bin/bash
-        hdiutil create -size 5m -fs HFS+ -type SPARSEBUNDLE -ov -volname "\(volumeName)" "\(dmgURL.path)"
-        hdiutil attach -nobrowse "\(dmgURL.appendingPathExtension("sparsebundle").path)"
-        """
-        try script.write(to: scriptURL, atomically: false, encoding: .utf8)
-        let permissions = NSNumber(value: Int16(0o770))
-        try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: scriptURL.path)
-        return try NSUserScriptTask(url: scriptURL)
-    }
-}
-#endif

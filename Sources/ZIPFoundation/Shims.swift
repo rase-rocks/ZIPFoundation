@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 //  POSIX compatibility shims plus the cross-platform `zip_off_t` alias.
@@ -111,5 +111,14 @@ import Android
 #error("Unsupported platform: ZIPFoundation needs a C library that exposes off_t.")
 #endif
 typealias zip_off_t = off_t
+#endif
+
+// Autorelease pools only exist on platforms with an Objective-C runtime.
+// Elsewhere, this stand-in runs the body directly so call sites can use
+// `autoreleasepool` without `#if canImport(ObjectiveC)`.
+#if !canImport(ObjectiveC)
+func autoreleasepool<Result>(invoking body: () throws -> Result) rethrows -> Result {
+    return try body()
+}
 #endif
 // swiftlint:enable identifier_name type_name

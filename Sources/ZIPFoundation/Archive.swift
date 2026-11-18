@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import Foundation
@@ -23,11 +23,10 @@ public let defaultFilePermissions = UInt16(0o644)
 public let defaultDirectoryPermissions = UInt16(0o755)
 let defaultPOSIXBufferSize = defaultReadChunkSize
 let defaultDirectoryUnitCount = Int64(1)
-/// The maximum accepted length (in bytes) of a stored symbolic-link target. A link target is a
-/// filesystem path, bounded by `PATH_MAX` (1024 on Darwin, 4096 on Linux); 4096 is a safe ceiling.
-let maxSymlinkTargetLength = 4096
 let minEndOfCentralDirectoryOffset = Int64(22)
 let maxDirectoryEndOffset = Int64(66000)
+/// The maximum size of a symlink destination. Longer destinations are not usable as a path on any platform.
+let maxSymbolicLinkDestinationSize = 4096
 let endOfCentralDirectoryStructSignature = 0x06054b50
 let localFileHeaderStructSignature = 0x04034b50
 let dataDescriptorStructSignature = 0x08074b50
@@ -128,7 +127,6 @@ public final class Archive: Sequence {
 
     enum ExtraFieldHeaderID: UInt16 {
         case zip64ExtendedInformation = 0x0001
-        case infoZIPUnicodePath = 0x7075
     }
 
     struct EndOfCentralDirectoryRecord: DataSerializable {
@@ -183,8 +181,8 @@ public final class Archive: Sequence {
     ///   - pathEncoding: Encoding for entry paths. Overrides the encoding specified in the archive.
     ///                   This encoding is only used when _decoding_ paths from the receiver.
     ///                   Paths of entries added with `addEntry` are always UTF-8 encoded.
-    /// - Returns: An archive initialized with a backing file at the passed in file URL and the given access mode
-    ///   or `nil` if the following criteria are not met:
+    /// - Returns: An archive initialized with a backing file at the passed in file URL and the given access mode.
+    /// - Throws: An error if the following criteria are not met or if the backing file is not a valid archive.
     /// - Note:
     ///   - The file URL _must_ point to an existing file for `AccessMode.read`.
     ///   - The file URL _must_ point to a non-existing file for `AccessMode.create`.
@@ -251,13 +249,23 @@ public final class Archive: Sequence {
             var zip64DataDescriptor: ZIP64DataDescriptor?
             if centralDirStruct.usesDataDescriptor {
                 let additionalSize = UInt64(localFileHeader.fileNameLength) + UInt64(localFileHeader.extraFieldLength)
-                let isCompressed = centralDirStruct.compressionMethod != CompressionMethod.none.rawValue
-                let dataSize = isCompressed
-                ? centralDirStruct.effectiveCompressedSize
-                : centralDirStruct.effectiveUncompressedSize
-                let descriptorPosition = offset + UInt64(LocalFileHeader.size) + additionalSize + dataSize
+                // The descriptor follows the bytes stored in the archive, regardless of compression method.
+                let dataSize = centralDirStruct.effectiveCompressedSize
+                let dataPosition = offset + UInt64(LocalFileHeader.size) + additionalSize
+                // `dataSize` can't be trusted. An overflowing position is unreadable and yields no descriptor.
+                let (position, didOverflow) = dataPosition.addingReportingOverflow(dataSize)
+                let descriptorPosition = didOverflow ? .max : position
                 if centralDirStruct.isZIP64 {
                     zip64DataDescriptor = Data.readStruct(from: self.archiveFile, at: descriptorPosition)
+                    // Neither the version nor ZIP64 extended information in the central directory say how
+                    // the descriptor was written. An entry that only needs ZIP64 for its offset has a
+                    // descriptor with 4 byte sizes. The sizes of the central directory tell them apart.
+                    if zip64DataDescriptor?.matchesSizes(of: centralDirStruct) != true,
+                       let descriptor: DataDescriptor = Data.readStruct(from: self.archiveFile,
+                                                                         at: descriptorPosition),
+                       descriptor.matchesSizes(of: centralDirStruct) {
+                        (dataDescriptor, zip64DataDescriptor) = (descriptor, nil)
+                    }
                 } else {
                     dataDescriptor = Data.readStruct(from: self.archiveFile, at: descriptorPosition)
                 }
@@ -280,6 +288,8 @@ public final class Archive: Sequence {
     ///   Therefore an archive can contain multiple entries with the same path. This method
     ///   always returns the first `Entry` with the given `path`.
     ///
+    /// Lookup uses the archive's explicit path encoding when one was supplied.
+    ///
     /// - Parameter path: A relative file path identifying the corresponding `Entry`.
     /// - Returns: An `Entry` with the given `path`. Otherwise, `nil`.
     public subscript(path: String) -> Entry? {
@@ -287,48 +297,6 @@ public final class Archive: Sequence {
             return self.first { $0.path(using: encoding) == path }
         }
         return self.first { $0.path == path }
-    }
-
-    // MARK: - Helpers
-
-    static func scanForEndOfCentralDirectoryRecord(in file: FILEPointer)
-    -> EndOfCentralDirectoryStructure? {
-        var eocdOffset: UInt64 = 0
-        var index = minEndOfCentralDirectoryOffset
-        fseeko(file, 0, SEEK_END)
-        let archiveLength = Int64(ftello(file))
-        guard archiveLength >= 0 else { return nil }
-
-        while eocdOffset == 0 && index < maxDirectoryEndOffset && index <= archiveLength {
-            fseeko(file, zip_off_t(archiveLength - index), SEEK_SET)
-            var potentialDirectoryEndTag: UInt32 = UInt32()
-            fread(&potentialDirectoryEndTag, 1, MemoryLayout<UInt32>.size, file)
-            if potentialDirectoryEndTag == UInt32(endOfCentralDirectoryStructSignature) {
-                eocdOffset = UInt64(archiveLength - index)
-                guard let eocd: EndOfCentralDirectoryRecord = Data.readStruct(from: file, at: eocdOffset) else {
-                    return nil
-                }
-                let zip64EOCD = scanForZIP64EndOfCentralDirectory(in: file, eocdOffset: eocdOffset)
-                return (eocd, zip64EOCD)
-            }
-            index += 1
-        }
-        return nil
-    }
-
-    private static func scanForZIP64EndOfCentralDirectory(in file: FILEPointer, eocdOffset: UInt64)
-    -> ZIP64EndOfCentralDirectory? {
-        guard UInt64(ZIP64EndOfCentralDirectoryLocator.size) < eocdOffset else { return nil }
-
-        let locatorOffset = eocdOffset - UInt64(ZIP64EndOfCentralDirectoryLocator.size)
-        guard UInt64(ZIP64EndOfCentralDirectoryRecord.size) < locatorOffset else { return nil }
-
-        let recordOffset = locatorOffset - UInt64(ZIP64EndOfCentralDirectoryRecord.size)
-        guard let locator: ZIP64EndOfCentralDirectoryLocator = Data.readStruct(from: file, at: locatorOffset),
-              let record: ZIP64EndOfCentralDirectoryRecord = Data.readStruct(from: file, at: recordOffset) else {
-            return nil
-        }
-        return ZIP64EndOfCentralDirectory(record: record, locator: locator)
     }
 }
 

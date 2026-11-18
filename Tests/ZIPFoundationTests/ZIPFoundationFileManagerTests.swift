@@ -5,7 +5,7 @@
 //  Copyright © 2017-2026 Thomas Zoechling, https://www.peakstep.com and the ZIP Foundation project authors.
 //  Released under the MIT License.
 //
-//  See https://github.com/weichsel/ZIPFoundation/blob/master/LICENSE for license information.
+//  See https://github.com/weichsel/ZIPFoundation/blob/main/LICENSE for license information.
 //
 
 import XCTest
@@ -54,6 +54,8 @@ extension ZIPFoundationTests {
     }
 
     func testZipItemErrorConditions() {
+        // The expected errors depend on Darwin file system behavior and on not running as root.
+#if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
         let fileManager = FileManager()
         let nonExistingURL1 = URL(fileURLWithPath: "/nothing")
         let nonExistingURL2 = URL(fileURLWithPath: "/nowhere")
@@ -82,6 +84,7 @@ extension ZIPFoundationTests {
         let directoryURL = unreadableFileURL.deletingLastPathComponent()
         XCTAssertCocoaError(try fileManager.zipItem(at: directoryURL, to: directoryArchiveURL),
                             throwsErrorWithCode: .fileReadNoPermission)
+#endif
     }
 
     func testUnzipItem() {
@@ -100,6 +103,24 @@ extension ZIPFoundationTests {
             if itemsExist == false { break }
         }
         XCTAssert(itemsExist)
+    }
+
+    func testUnzipItemToRelativeDestination() throws {
+        // Destination URLs that were created from relative paths have to be resolved against their base URL.
+        let fileManager = FileManager()
+        let archive = self.archive(for: "testUnzipItem", mode: .read)
+        let baseURL = self.createDirectory(for: #function)
+        let workingDirectoryURL = baseURL.appendingPathComponent("working", isDirectory: true)
+        try fileManager.createDirectory(at: workingDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+        let previousDirectoryPath = fileManager.currentDirectoryPath
+        XCTAssertTrue(fileManager.changeCurrentDirectoryPath(workingDirectoryURL.path))
+        defer { _ = fileManager.changeCurrentDirectoryPath(previousDirectoryPath) }
+        let relativeURL = URL(fileURLWithPath: "../destination", isDirectory: true)
+        try fileManager.unzipItem(at: archive.url, to: relativeURL)
+        let destinationURL = baseURL.appendingPathComponent("destination", isDirectory: true)
+        for entry in archive {
+            XCTAssertTrue(fileManager.itemExists(at: destinationURL.appendingPathComponent(entry.path)))
+        }
     }
 
     func testUnzipItemWithPreferredEncoding() {
@@ -154,12 +175,33 @@ extension ZIPFoundationTests {
         let linkURL = linkArchiveURL.deletingLastPathComponent()
         let linkTarget = linkURL.path
         let linkArchive = try Archive(url: linkArchiveURL, accessMode: .create)
-        try? linkArchive.addEntry(with: "link", type: .symlink, uncompressedSize: Int64(4),
-                                  provider: { (_, _) -> Data in
+        // The stated size is too small. The actual size of the destination is recorded.
+        try linkArchive.addEntry(with: "link", type: .symlink, uncompressedSize: Int64(4),
+                                 provider: { (_, _) -> Data in
             return Data(linkTarget.utf8)
         })
-        try? fileManager.unzipItem(at: linkArchiveURL, to: destinationURL, symlinksValidWithin: URL.rootFS)
+        let reopenedArchive = try Archive(url: linkArchiveURL, accessMode: .read)
+        let linkEntry = try XCTUnwrap(reopenedArchive["link"])
+        XCTAssertEqual(linkEntry.uncompressedSize, UInt64(linkTarget.utf8.count))
+        XCTAssertEqual(linkEntry.compressedSize, UInt64(linkTarget.utf8.count))
+        XCTAssertEqual(linkEntry.localFileHeader.uncompressedSize, UInt32(linkTarget.utf8.count))
+        try fileManager.unzipItem(at: linkArchiveURL, to: destinationURL, symlinksValidWithin: URL.rootFS)
         XCTAssert(fileManager.itemExists(at: destinationURL.appendingPathComponent("link")))
+
+        // Link destinations that can't be resolved reliably are only valid,
+        // if the caller opted out of the restriction.
+        let unresolvableArchive = self.archive(for: #function, mode: .create)
+        try unresolvableArchive.addEntry(with: "unresolvable", type: .symlink, uncompressedSize: Int64(17),
+                                         provider: { (_, _) -> Data in
+            return Data("missing/../target".utf8)
+        })
+        let unresolvableURL = destinationURL.appendingPathComponent("unresolvable")
+        XCTAssertSwiftError(try fileManager.unzipItem(at: unresolvableArchive.url, to: destinationURL),
+                            throws: Archive.ArchiveError.uncontainedSymlink)
+        XCTAssertFalse(fileManager.itemExists(at: unresolvableURL))
+        XCTAssertNoThrow(try fileManager.unzipItem(at: unresolvableArchive.url, to: destinationURL,
+                                                   symlinksValidWithin: URL.rootFS))
+        XCTAssertEqual(try? fileManager.destinationOfSymbolicLink(atPath: unresolvableURL.path), "missing/../target")
     }
 
     // On Darwin platforms, we want the same behavior as the system-provided ZIP utilities.
